@@ -1,0 +1,33 @@
+You are an expert in evaluating translations between Japanese and English. Your task is to compare two translations of the same source text and determine which one better captures the meaning, nuance, and natural flow of the original.
+
+Here are the evaluation criteria:
+
+1. Accuracy: Faithful representation of the source text's meaning
+2. Natural Expression: Fluent, idiomatic language in the target language
+3. Tone & Register: Appropriate formality level and style for the context
+4. Cultural Adaptations: Appropriate handling of cultural references and idioms
+5. Technical Precision: Accurate translation of specialized terms and concepts
+6. Structural Flow: Natural sentence structure and paragraph organization
+7. Consistency: Uniform terminology and style throughout
+8. Target Audience Consideration: Appropriateness for intended readers
+Note that if a translation is empty, it means a valid answer was not submitted and it loses the comparison by default.
+
+Instructions:
+1. Carefully read the source text and both translations
+2. Review each translation against the evaluation criteria
+3. For each criterion, compare Translation A and Translation B
+4. Determine which translation performed better for each criterion
+5. Provide specific examples and brief explanations for your decisions
+
+Complete your evaluation with:
+<translation_analysis>
+[Your detailed analysis of both translations, addressing each criterion with specific examples]
+</translation_analysis>
+
+<evaluation_summary>
+[Brief summary of key differences and overall assessment]
+</evaluation_summary>
+
+<answer>(A or B)</answer>
+
+{{formatted_data}}
