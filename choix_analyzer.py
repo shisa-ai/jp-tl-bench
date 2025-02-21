@@ -2,6 +2,12 @@ import choix
 import numpy as np
 from typing import List, Tuple
 import pandas as pd
+import click
+import glob
+import json
+import re
+import os
+import shutil 
 
 class LLMRanker:
     def __init__(self):
@@ -98,13 +104,12 @@ class LLMRanker:
         prob, _ = choix.probabilities((idx1, idx2), self.params)
         return prob
 
-# Example usage:
-if __name__ == "__main__":
-    import json
-    import re
-    import os
-    import glob
 
+@click.command()
+@click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
+@click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
+
+def main(target_model, judge_model):
     # Read and process all JSONL files in the analysis directory
     comparisons = []
     analysis_files = glob.glob('analysis/*.jsonl')
@@ -174,10 +179,28 @@ if __name__ == "__main__":
     for llm, wins in sorted(ranker.wins_count.items(), key=lambda x: x[1], reverse=True):
         print(f"{llm}: {wins} wins")
     
-    # Save rankings to scores/scores.jsonl
-    os.makedirs('scores', exist_ok=True)
-    with open('scores/scores.jsonl', 'w') as f:
-        rankings_dict = rankings.to_dict(orient='records')
-        for rank in rankings_dict:
-            json.dump(rank, f)
-            f.write('\n')
+    # Only save files if both model names are provided
+    if target_model and judge_model:
+        # Save rankings with safe model names
+        safe_model_name = target_model.replace("/", "__")
+        safe_judge_name = judge_model.replace("/", "__")
+        
+        # Save scores
+        output_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
+        os.makedirs('scores', exist_ok=True)
+        with open(output_file, 'w') as f:
+            rankings_dict = rankings.to_dict(orient='records')
+            for rank in rankings_dict:
+                json.dump(rank, f)
+                f.write('\n')
+        print(f"\nScores saved to: {output_file}")
+        
+        # Move and rename analysis file
+        analysis_file = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
+        if os.path.exists(analysis_file):
+            new_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
+            shutil.move(analysis_file, new_file)
+            print(f"Results saved to: {new_file}")
+
+if __name__ == "__main__":
+    main()
