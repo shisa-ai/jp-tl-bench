@@ -82,6 +82,10 @@ def generate_translation_pairs(target_file):
                     "llm_a": settings["llm_a"],
                     "llm_b": settings["llm_b"],
                     "formatted_data": formatted_data
+                    "name" : input["name"],
+                    "english": input["english"],
+                    "difficulty" : input["difficulty"],
+
                 }
                 
                 # Write to output file

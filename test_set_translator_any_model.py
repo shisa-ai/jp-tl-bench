@@ -46,6 +46,8 @@ class Translator(curator.LLM):
         return {
             "name": input["name"],
             "source_text": input["text"],
+            "difficulty" : input["difficulty"],
+            "english" : input["english"],
             "full_response": response,
             "translation": translation,
             "prompt": prompt_text  # Add the prompt to the output

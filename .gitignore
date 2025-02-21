@@ -5,10 +5,16 @@ __pycache__/
 
 
 #User-Added 
-*.jsonl
+
+#User-Added 
+logs/
+scores/
+base_conversation_pairs.jsonl
+latest_conversation_pairs.jsonl
 
 # C extensions
 *.so
+
 
 # Distribution / packaging
 .Python

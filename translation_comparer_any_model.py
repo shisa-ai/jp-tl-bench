@@ -17,6 +17,9 @@ class TranslationComparer(curator.LLM):
     def parse(self, input: dict, response: str) -> dict:
         """Parse the model response along with the input data into the desired output format."""
         return {
+            "name" : input["name"],
+            "english": input["english"],
+            "difficulty" : input["difficulty"],
             "id": input["id"],
             "llm_a": input["llm_a"],
             "llm_b": input["llm_b"],

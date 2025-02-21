@@ -15,6 +15,7 @@ OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
 JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
 JUDGE_MODEL="${JUDGE_MODEL:-Nexusflow/Athene-V2-Chat}"  # Default judge model
 CURATOR_DISABLE_CACHE=true
+BASE_RESULTS_DIR="/fsx/ubuntu/evals/shisa-tl-bench/logs"
 
 echo "Running on node: $(hostname)"
 
@@ -58,7 +59,7 @@ source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
 mamba activate /fsx/ubuntu/miniforge3/envs/vllm
 
 # Change to working directory
-cd /fsx/ubuntu/meti/eval/shisa-translation-bench
+cd /fsx/ubuntu/evals/shisa-tl-bench
 
 # Calculate cluster size and parallelism
 TOTAL_GPUS=$((SLURM_NNODES * $(nvidia-smi -L | wc -l)))
