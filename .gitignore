@@ -5,10 +5,9 @@ __pycache__/
 
 
 #User-Added 
-
-#User-Added 
 logs/
 scores/
+translations/
 base_conversation_pairs.jsonl
 latest_conversation_pairs.jsonl
 
