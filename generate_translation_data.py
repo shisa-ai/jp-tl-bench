@@ -9,21 +9,24 @@ import re
 class Translator(curator.LLM):
     """Translates text using a specified model."""
 
-    def __init__(self, model_name: str, backend: str, backend_params: dict, low_context: bool = False):
+    def __init__(self, model_name: str, backend: str, backend_params: dict, low_context: bool = False, ultra_low_context: bool = False):
         super().__init__(model_name=model_name, backend=backend, backend_params=backend_params)
         self.low_context = low_context
+        self.ultra_low_context = ultra_low_context
 
-    def get_prompt_path(self, english_in_input: bool) -> str:
+    def get_prompt_path(self, english: bool) -> str:
         """Determine which prompt file to use based on input language and context setting."""
-        base_name = "translate_prompt_from_english" if english_in_input else "translate_prompt_from_japanese"
-        if self.low_context:
+        base_name = "translate_prompt_from_english" if english else "translate_prompt_from_japanese"
+        if self.ultra_low_context:
+            base_name += "_ultra_low_context"
+        elif self.low_context:
             base_name += "_low_context"
         return f"prompts/{base_name}.txt"
 
     def prompt(self, input: dict) -> str:
         """Generate a prompt for translation using the appropriate template based on input language."""
-        english_in_input = input.get("english_in_input", True)  # Default to English if not specified
-        prompt_path = self.get_prompt_path(english_in_input)
+        english = input.get("english", True)  # Default to English if not specified
+        prompt_path = self.get_prompt_path(english)
         
         with open(prompt_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
@@ -58,8 +61,9 @@ class Translator(curator.LLM):
 @click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
 @click.option('--test-model-name', '-t', required=True, help='Model name to use for translation')
 @click.option('--low-context', is_flag=True, help='Use low context prompts')
+@click.option('--ultra-low-context', is_flag=True, help='Use ultra low context prompts (4096 tokens)')
 @click.option('--commercial-model', is_flag=True, help='Use commercial model rate limits')
-def main(base_url, test_model_name, low_context, commercial_model):
+def main(base_url, test_model_name, low_context, ultra_low_context, commercial_model):
     """Translate text using the specified model.
 
     Loads the translation test set from shisa-ai/bt_translation_test,
@@ -81,7 +85,8 @@ def main(base_url, test_model_name, low_context, commercial_model):
             model_name=test_model_name,
             backend=backend,
             backend_params=backend_params,
-            low_context=low_context
+            low_context=low_context,
+            ultra_low_context=ultra_low_context
         )
     else:
         backend_params = {
@@ -93,7 +98,8 @@ def main(base_url, test_model_name, low_context, commercial_model):
             model_name="hosted_vllm/" + test_model_name,
             backend=backend,
             backend_params=backend_params,
-            low_context=low_context
+            low_context=low_context,
+            ultra_low_context=ultra_low_context
         )
 
     results = translator(dataset)

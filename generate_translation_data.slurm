@@ -11,6 +11,7 @@
 # Default values
 MODEL="${MODEL:-}"  # Use empty string if MODEL is not set
 LOW_CONTEXT="${LOW_CONTEXT:-false}"  # Default to false if not set
+ULTRA_LOW_CONTEXT="${ULTRA_LOW_CONTEXT:-false}"  # Default to false if not set
 OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
 JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
 JUDGE_MODEL="${JUDGE_MODEL:-Nexusflow/Athene-V2-Chat}"  # Default judge model
@@ -79,6 +80,25 @@ check_server() {
     curl -s -f "http://${host}:${port}/v1/models" > /dev/null
     return $?
 }
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --low-context)
+            LOW_CONTEXT=true
+            shift
+            ;;
+        --ultra-low-context)
+            ULTRA_LOW_CONTEXT=true
+            shift
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            exit 1
+            ;;
+    esac
+done
+
 if [ "${SLURM_PROCID}" -eq 0 ]; then
         log "Proceeding with VLLM startup"
     
@@ -98,6 +118,8 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
     VLLM_CMD="vllm serve $MODEL --tensor-parallel-size $TENSOR_PARALLEL_SIZE"
     if [ "$LOW_CONTEXT" = "true" ]; then
         VLLM_CMD="$VLLM_CMD --gpu-memory-utilization 0.95 --num-scheduler-steps 20 --max-model-len 8192 --host 0.0.0.0 --port 8000 --trust-remote-code"
+    elif [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
+        VLLM_CMD="$VLLM_CMD --gpu-memory-utilization 0.95 --num-scheduler-steps 20 --max-model-len 4096 --host 0.0.0.0 --port 8000 --trust-remote-code"
     else
         VLLM_CMD="$VLLM_CMD --gpu-memory-utilization 0.95 --num-scheduler-steps 20 --max-model-len 14000 --host 0.0.0.0 --port 8000 --trust-remote-code"
     fi
@@ -159,6 +181,8 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
 
     if [ "$LOW_CONTEXT" = "true" ]; then
         python generate_translation_data.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL  --low-context
+    elif [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
+        python generate_translation_data.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL  --ultra-low-context
     else
         python generate_translation_data.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL 
     fi

@@ -1,0 +1,5 @@
+Translate this English text to Japanese. 
+
+<source_text>
+{{text}}
+</source_text>
