@@ -209,6 +209,75 @@ class LLMRanker:
         return prob
 
 
+
+def load_comparisons_from_file(file_path):
+    """Helper function to load comparisons from a file."""
+    comparisons = []
+    # Check if this is a base set file
+    is_base_file = 'base_set.' in file_path
+    
+    with open(file_path, 'r') as f:
+        for line in f:
+            try:
+                data = json.loads(line)
+                if 'llm_a' not in data or 'llm_b' not in data or 'analysis' not in data:
+                    continue
+                
+                # Extract difficulty and language
+                difficulty = data['difficulty']
+                is_english = data['english']
+                
+                if difficulty not in ['easy', 'hard']:
+                    raise ValueError(f"Invalid difficulty value '{difficulty}'. Must be 'easy' or 'hard'")
+                
+                # Extract the winner from analysis field
+                match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
+                if not match:
+                    continue
+                        
+                answer_content = match.group(1)
+                # Remove anything that isn't an ASCII letter
+                cleaned_answer = ''.join(c for c in answer_content if c.isalpha())
+                
+                if not cleaned_answer:
+                    continue
+                        
+                cleaned_answer = cleaned_answer.lower()
+                
+                '''
+                In order to have proper handling of models that appear in the base set, we prefix base set models with a 'base__'
+
+                The base model is always llm2 for our target model comparison file so we have to prefix 'base__' as well there
+                '''
+                # Add prefix to model names if from base set
+                if is_base_file:
+                    llm1 = f"base__{data['llm_a']}"
+                    llm2 = f"base__{data['llm_b']}"
+                else:
+                    llm1 = data['llm_a']
+                    llm2 = f"base__{data['llm_b']}"
+
+                
+                if cleaned_answer == 'a':
+                    winner = llm1
+                elif cleaned_answer == 'b':
+                    winner = llm2
+                else:
+                    print(f"Error: Invalid answer content in <answer> tag: {answer_content}")
+                    continue
+                        
+                comparisons.append((llm1, llm2, winner, difficulty, is_english))
+                
+            except json.JSONDecodeError:
+                print("Error: Invalid JSON line encountered")
+                continue
+            except Exception as e:
+                print(f"Error processing line: {str(e)}")
+                continue
+    return comparisons
+
+
+
 @click.command()
 @click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
@@ -235,60 +304,11 @@ def main(target_model, judge_model):
             print(f"Analysis file not found: {file_path}")
             if not comparisons:  # If we don't even have base comparisons
                 exit(1)
-                
-    for file_path in analysis_files:
-        print(f"Processing {file_path}...")
-        with open(file_path, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    if 'llm_a' not in data or 'llm_b' not in data or 'analysis' not in data:
-                        continue
-                    
-                    # Extract difficulty and language
-                    difficulty = data.get('difficulty', 'easy')
-                    is_english = data.get('english', True)
-                    if difficulty not in ['easy', 'hard']:
-                        continue
-                        
-                    # Extract the winner from analysis field
-                    match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
-                    if not match:
-                        continue
-                        
-                    answer_content = match.group(1)
-                    # Remove anything that isn't an ASCII letter
-                    cleaned_answer = ''.join(c for c in answer_content if c.isalpha())
-                    
-                    if not cleaned_answer:
-                        continue
-                        
-                    cleaned_answer = cleaned_answer.lower()
-                    
-                    llm1 = data['llm_a']
-                    llm2 = data['llm_b']
-                    
-                    if cleaned_answer == 'a':
-                        winner = llm1
-                    elif cleaned_answer == 'b':
-                        winner = llm2
-                    else:
-                        print(f"Error: Invalid answer content in <answer> tag: {answer_content}")
-                        continue
-                        
-                    comparisons.append((llm1, llm2, winner, difficulty, is_english))
-                    
-                except json.JSONDecodeError:
-                    print("Error: Invalid JSON line encountered")
-                    continue
-                except Exception as e:
-                    print(f"Error processing line: {str(e)}")
-                    continue
     
     if not comparisons:
         print("No valid comparisons found in any files")
         exit(1)
-        
+            
     # Initialize and fit the model
     ranker = LLMRanker()
     ranker.fit(comparisons)
@@ -334,24 +354,43 @@ def main(target_model, judge_model):
     if target_model and judge_model:
         # Save rankings with safe model names
         safe_model_name = target_model.replace("/", "__")
-        safe_judge_name = judge_model.replace("/", "__")
+        
+        # Create scores directory if it doesn't exist
+        os.makedirs('scores', exist_ok=True)
         
         # Save scores
-        output_file = f'scores/{safe_model_name}_translation_bench_scores.jsonl'
-        os.makedirs('scores', exist_ok=True)
-        with open(output_file, 'w') as f:
-            rankings_dict = rankings.to_dict(orient='records')
-            for rank in rankings_dict:
-                json.dump(rank, f)
-                f.write('\n')
-        print(f"\nScores saved to: {output_file}")
+        scores_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
         
-        # Move and rename analysis file
-        analysis_file = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
-        if os.path.exists(analysis_file):
-            new_file = f'scores/{safe_model_name}_translation_bench_answers.jsonl'
-            shutil.move(analysis_file, new_file)
-            print(f"Results saved to: {new_file}")
+        with open(scores_file, 'w') as f:
+            # Save overall rankings for each difficulty
+            for diff in ['all', 'easy', 'hard']:
+                try:
+                    rankings = ranker.get_rankings(diff)
+                    rankings['difficulty'] = diff
+                    rankings['language'] = 'all'
+                    rankings['llm'] = rankings['llm'].str.replace('__', '/')
+                    rankings.to_json(f, orient='records', lines=True)
+                except ValueError:
+                    continue
+
+            # Save language-specific rankings
+            for lang in ['english', 'japanese']:
+                for diff in ['all', 'easy', 'hard']:
+                    try:
+                        rankings = ranker.get_rankings(diff, lang)
+                        rankings['difficulty'] = diff
+                        rankings['language'] = lang
+                        rankings['llm'] = rankings['llm'].str.replace('__', '/')
+                        rankings.to_json(f, orient='records', lines=True)
+                    except ValueError:
+                        continue
+        
+        print(f"\nScores saved to: {scores_file}")
+        
+        # Save raw answers for analysis
+        answers_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
+        shutil.copy(file_path, answers_file)
+        print(f"Results saved to: {answers_file}")
 
 if __name__ == "__main__":
     main()
