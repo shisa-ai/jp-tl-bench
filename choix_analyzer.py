@@ -389,7 +389,7 @@ def main(target_model, judge_model):
         
         # Save raw answers for analysis
         answers_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
-        shutil.copy(file_path, answers_file)
+        shutil.move(file_path, answers_file)
         print(f"Results saved to: {answers_file}")
 
 if __name__ == "__main__":
