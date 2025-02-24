@@ -59,18 +59,18 @@ def generate_translation_pairs(target_file=None, generate_base=False):
     
     
     if target_file:
-        # Check if target file exists in conversations directory
+        # Check if target file exists in translations directory
         if not os.path.exists(os.path.join(translations_dir, target_file)):
             raise click.BadParameter(f"File {target_file} not found in {translations_dir}")
-        # Get all files from base_conversations to compare against
-        base_files = [f for f in os.listdir(translations_dir) if f.endswith('.jsonl')]
+        # Get all files from base_translations to compare against
+        base_files = [f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl')]
         pairs = [(target_file, base_file) for base_file in base_files]
-        print(f"Comparing {target_file} against {len(base_files)} files from {translations_dir}")
+        print(f"Comparing {target_file} against {len(base_files)} files from {base_translations_dir}")
     else:
-        # Determine which directory to use and get JSONL files
-        working_dir = base_translations_dir if generate_base else translations_dir
-        jsonl_files = [f for f in os.listdir(working_dir) if f.endswith('.jsonl')]
+        # Get all files from base_translations for pairwise comparison
+        jsonl_files = [f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl')]
         pairs = list(combinations(jsonl_files, 2))
+        print(f"Generating all pairwise combinations from {len(jsonl_files)} files in {base_translations_dir}")
     
     # Process pairs and write to output
     total_pairs = 0
@@ -78,8 +78,12 @@ def generate_translation_pairs(target_file=None, generate_base=False):
     
     # First pass to count items in each file
     for file_a, file_b in pairs:
-        file_a_path = os.path.join(translations_dir if target_file else working_dir, file_a)
-        file_b_path = os.path.join(translations_dir if target_file else working_dir, file_b)
+        if target_file:
+            file_a_path = os.path.join(translations_dir, file_a)
+            file_b_path = os.path.join(base_translations_dir, file_b)
+        else:
+            file_a_path = os.path.join(base_translations_dir, file_a)
+            file_b_path = os.path.join(base_translations_dir, file_b)
         
         if file_a not in file_lengths:
             file_lengths[file_a] = len(load_jsonl(file_a_path))
@@ -89,13 +93,13 @@ def generate_translation_pairs(target_file=None, generate_base=False):
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
             if target_file:
-                # Load target file from conversations and comparison file from base_conversations
+                # Load target file from translations and comparison file from base_translations
                 convs_a = load_jsonl(os.path.join(translations_dir, file_a))
                 convs_b = load_jsonl(os.path.join(base_translations_dir, file_b))
             else:
                 # Load both files from the same working directory
-                convs_a = load_jsonl(os.path.join(working_dir, file_a))
-                convs_b = load_jsonl(os.path.join(working_dir, file_b))
+                convs_a = load_jsonl(os.path.join(base_translations_dir, file_a))
+                convs_b = load_jsonl(os.path.join(base_translations_dir, file_b))
             
             # Validate that files have equal length
             if len(convs_a) != len(convs_b):

@@ -214,10 +214,28 @@ class LLMRanker:
 @click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
 
 def main(target_model, judge_model):
-    # Read and process all JSONL files in the analysis directory
+    # Always load base set comparisons first
     comparisons = []
-    analysis_files = glob.glob('analysis/*.jsonl')
+    base_files = [f for f in glob.glob('analysis/base_set.*.jsonl')]
+    if base_files:
+        print("\nProcessing base set comparisons...")
+        for base_file in base_files:
+            comparisons.extend(load_comparisons_from_file(base_file))
     
+    # If target model and judge model are specified, load those comparisons too
+    if target_model and judge_model:
+        safe_model_name = target_model.replace("/", "__")
+        safe_judge_name = judge_model.replace("/", "__")
+        file_path = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
+        
+        if os.path.exists(file_path):
+            print(f"\nProcessing {file_path}...")
+            comparisons.extend(load_comparisons_from_file(file_path))
+        else:
+            print(f"Analysis file not found: {file_path}")
+            if not comparisons:  # If we don't even have base comparisons
+                exit(1)
+                
     for file_path in analysis_files:
         print(f"Processing {file_path}...")
         with open(file_path, 'r') as f:
@@ -319,7 +337,7 @@ def main(target_model, judge_model):
         safe_judge_name = judge_model.replace("/", "__")
         
         # Save scores
-        output_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
+        output_file = f'scores/{safe_model_name}_translation_bench_scores.jsonl'
         os.makedirs('scores', exist_ok=True)
         with open(output_file, 'w') as f:
             rankings_dict = rankings.to_dict(orient='records')
@@ -331,7 +349,7 @@ def main(target_model, judge_model):
         # Move and rename analysis file
         analysis_file = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
         if os.path.exists(analysis_file):
-            new_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
+            new_file = f'scores/{safe_model_name}_translation_bench_answers.jsonl'
             shutil.move(analysis_file, new_file)
             print(f"Results saved to: {new_file}")
 
