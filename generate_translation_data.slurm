@@ -158,9 +158,9 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
 
 
     if [ "$LOW_CONTEXT" = "true" ]; then
-        python test_set_translator_any_model.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL  --low-context
+        python generate_translation_data.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL  --low-context
     else
-        python test_set_translator_any_model.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL 
+        python generate_translation_data.py --base-url "http://localhost:8000/v1"  --test-model-name $MODEL 
     fi
 
     log "Eval script completed successfully."

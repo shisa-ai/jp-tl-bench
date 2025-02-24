@@ -85,7 +85,7 @@ def generate_translation_pairs(target_file=None, generate_base=False):
                 convs_a = load_jsonl(os.path.join(working_dir, file_a))
                 convs_b = load_jsonl(os.path.join(working_dir, file_b))
             
-    
+    total_pairs = 0
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
             path_a = os.path.join(translations_dir, file_a)
@@ -99,7 +99,7 @@ def generate_translation_pairs(target_file=None, generate_base=False):
                 # Create settings with unique ID and model names
                 settings = write_pair_settings(file_a, file_b)
                 
-                # Format both translations into a single markdown document
+                # Format both translations into a singlemarkdown document
                 formatted_data = format_translation_pair(conv_a, conv_b)
                 
                 # Combine into final format
@@ -116,8 +116,9 @@ def generate_translation_pairs(target_file=None, generate_base=False):
                 
                 # Write to output file
                 out_f.write(json.dumps(comparison_data, ensure_ascii=False) + '\n')
+                total_pairs += 1
                 
-    print(f"Generated translation pairs have been written to {output_file}")
+    print(f"Generated {total_pairs} total pairs written to {output_file}")
 
 
 @click.command()
