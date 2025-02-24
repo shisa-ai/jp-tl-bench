@@ -58,7 +58,8 @@ class Translator(curator.LLM):
 @click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
 @click.option('--test-model-name', '-t', required=True, help='Model name to use for translation')
 @click.option('--low-context', is_flag=True, help='Use low context prompts')
-def main(base_url, test_model_name, low_context):
+@click.option('--commercial-model', is_flag=True, help='Use commercial model rate limits')
+def main(base_url, test_model_name, low_context, commercial_model):
     """Translate text using the specified model.
 
     Loads the translation test set from shisa-ai/bt_translation_test,
@@ -70,18 +71,30 @@ def main(base_url, test_model_name, low_context):
     # Load the dataset
     dataset = load_dataset("shisa-ai/bt_translation_test")["train"]
 
-
     backend = "litellm"
-    backend_params = {"base_url": base_url,
-                    "max_requests_per_minute": 128,
-                    "max_tokens_per_minute": 10000000}
-
-    translator = Translator(
-        model_name="hosted_vllm/" + test_model_name,
-        backend=backend,
-        backend_params=backend_params,
-        low_context=low_context
-    )
+    if commercial_model:
+        backend_params = {
+            "max_requests_per_minute": 12,
+            "max_concurrent_requests": 12
+        }
+        translator = Translator(
+            model_name=test_model_name,
+            backend=backend,
+            backend_params=backend_params,
+            low_context=low_context
+        )
+    else:
+        backend_params = {
+            "base_url": base_url,
+            "max_requests_per_minute": 128,
+            "max_tokens_per_minute": 10000000
+        }
+        translator = Translator(
+            model_name="hosted_vllm/" + test_model_name,
+            backend=backend,
+            backend_params=backend_params,
+            low_context=low_context
+        )
 
     results = translator(dataset)
     
