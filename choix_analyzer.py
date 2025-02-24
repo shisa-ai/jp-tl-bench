@@ -16,18 +16,29 @@ class LLMRanker:
         self.n_items = 0
         self.params = None
         self.wins_count = {}  # Track raw number of wins for each LLM
+        self.wins_by_difficulty = {'easy': {}, 'hard': {}}
+        self.wins_by_language = {
+            'english': {'all': {}, 'easy': {}, 'hard': {}},
+            'japanese': {'all': {}, 'easy': {}, 'hard': {}}
+        }
+        self.total_matches = {
+            'all': {},
+            'easy': {},
+            'hard': {},
+            'english': {'all': {}, 'easy': {}, 'hard': {}},
+            'japanese': {'all': {}, 'easy': {}, 'hard': {}}
+        }
 
-    def process_comparisons(self, comparisons: List[Tuple[str, str, str]]):
+    def process_comparisons(self, comparisons: List[Tuple[str, str, str, str, bool]]):
         """
         Process raw comparison data into format needed for choix.
         
         Args:
-            comparisons: List of tuples (llm1, llm2, winner)
-                        where winner is either "llm1" or "llm2"
+            comparisons: List of tuples (llm1, llm2, winner, difficulty, is_english)
         """
         # First, build the mapping of LLM names to integers
         unique_llms = set()
-        for llm1, llm2, _ in comparisons:
+        for llm1, llm2, _, _, _ in comparisons:
             unique_llms.add(llm1)
             unique_llms.add(llm2)
         
@@ -35,58 +46,151 @@ class LLMRanker:
         self.idx_to_llm = {idx: llm for llm, idx in self.llm_to_idx.items()}
         self.n_items = len(self.llm_to_idx)
         
-        # Initialize wins count for each LLM
+        # Initialize counters
         self.wins_count = {llm: 0 for llm in unique_llms}
+        self.wins_by_difficulty = {
+            'easy': {llm: 0 for llm in unique_llms},
+            'hard': {llm: 0 for llm in unique_llms}
+        }
+        self.wins_by_language = {
+            'english': {
+                'all': {llm: 0 for llm in unique_llms},
+                'easy': {llm: 0 for llm in unique_llms},
+                'hard': {llm: 0 for llm in unique_llms}
+            },
+            'japanese': {
+                'all': {llm: 0 for llm in unique_llms},
+                'easy': {llm: 0 for llm in unique_llms},
+                'hard': {llm: 0 for llm in unique_llms}
+            }
+        }
         
-        # Convert comparisons to format needed by choix
-        processed_comparisons = []
-        for llm1, llm2, winner in comparisons:
+        # Initialize total_matches for all categories
+        self.total_matches = {
+            'all': {llm: 0 for llm in unique_llms},
+            'easy': {llm: 0 for llm in unique_llms},
+            'hard': {llm: 0 for llm in unique_llms},
+            'english': {
+                'all': {llm: 0 for llm in unique_llms},
+                'easy': {llm: 0 for llm in unique_llms},
+                'hard': {llm: 0 for llm in unique_llms}
+            },
+            'japanese': {
+                'all': {llm: 0 for llm in unique_llms},
+                'easy': {llm: 0 for llm in unique_llms},
+                'hard': {llm: 0 for llm in unique_llms}
+            }
+        }
+        
+        # Initialize processed_comparisons
+        processed_comparisons = {
+            'all': [],
+            'easy': [],
+            'hard': [],
+            'english': {'all': [], 'easy': [], 'hard': []},
+            'japanese': {'all': [], 'easy': [], 'hard': []}
+        }
+        
+        for llm1, llm2, winner, difficulty, is_english in comparisons:
             idx1 = self.llm_to_idx[llm1]
             idx2 = self.llm_to_idx[llm2]
+            lang = 'english' if is_english else 'japanese'
+            
+            # Track total matches for both LLMs in all relevant categories
+            for model in [llm1, llm2]:
+                # Overall
+                self.total_matches['all'][model] += 1
+                # By difficulty
+                self.total_matches[difficulty][model] += 1
+                # By language
+                self.total_matches[lang]['all'][model] += 1
+                self.total_matches[lang][difficulty][model] += 1
+            
             # Track wins
             self.wins_count[winner] += 1
+            self.wins_by_difficulty[difficulty][winner] += 1
+            self.wins_by_language[lang]['all'][winner] += 1
+            self.wins_by_language[lang][difficulty][winner] += 1
+            
             if winner == llm1:
-                processed_comparisons.append((idx1, idx2))
+                comparison = (idx1, idx2)
             else:
-                processed_comparisons.append((idx2, idx1))
+                comparison = (idx2, idx1)
+                
+            processed_comparisons['all'].append(comparison)
+            processed_comparisons[difficulty].append(comparison)
+            processed_comparisons[lang]['all'].append(comparison)
+            processed_comparisons[lang][difficulty].append(comparison)
                 
         return processed_comparisons
 
-    def fit(self, comparisons: List[Tuple[str, str, str]]):
+    def fit(self, comparisons: List[Tuple[str, str, str, str, bool]]):
         """
-        Fit the Bradley-Terry model to the comparison data.
+        Fit the Bradley-Terry model to all comparison subsets.
         """
         processed_data = self.process_comparisons(comparisons)
-        self.params = choix.opt_pairwise(self.n_items, processed_data)
+        self.params = {
+            'all': choix.opt_pairwise(self.n_items, processed_data['all']),
+            'easy': choix.opt_pairwise(self.n_items, processed_data['easy']) if processed_data['easy'] else None,
+            'hard': choix.opt_pairwise(self.n_items, processed_data['hard']) if processed_data['hard'] else None,
+            'english': {
+                'all': choix.opt_pairwise(self.n_items, processed_data['english']['all']) if processed_data['english']['all'] else None,
+                'easy': choix.opt_pairwise(self.n_items, processed_data['english']['easy']) if processed_data['english']['easy'] else None,
+                'hard': choix.opt_pairwise(self.n_items, processed_data['english']['hard']) if processed_data['english']['hard'] else None
+            },
+            'japanese': {
+                'all': choix.opt_pairwise(self.n_items, processed_data['japanese']['all']) if processed_data['japanese']['all'] else None,
+                'easy': choix.opt_pairwise(self.n_items, processed_data['japanese']['easy']) if processed_data['japanese']['easy'] else None,
+                'hard': choix.opt_pairwise(self.n_items, processed_data['japanese']['hard']) if processed_data['japanese']['hard'] else None
+            }
+        }
         
-    def get_rankings(self) -> pd.DataFrame:
+    def get_rankings(self, difficulty: str = 'all', language: str = None) -> pd.DataFrame:
         """
         Returns a DataFrame with LLMs ranked by their scores and win counts.
-        """
-        if self.params is None:
-            raise ValueError("Must fit model before getting rankings")
         
+        Args:
+            difficulty: 'all', 'easy', or 'hard'
+            language: None, 'english', or 'japanese'
+        """
         '''
         See more about EN & LT: https://chatgpt.com/share/67b34c25-61c8-8012-8667-17077284d92a
         '''
 
-        # 1) Exponential & Normalize (EN)
-        exp_params = np.exp(self.params)
-        sum_exp = np.sum(exp_params)
-        en_scores = exp_params / sum_exp  # 0-1 scale
-        en_scores_0_10 = en_scores * 10   # 0-10 scale if desired
+        if language:
+            if self.params is None or self.params[language] is None or self.params[language][difficulty] is None:
+                raise ValueError(f"No data for {language} {difficulty} rankings")
+            params = self.params[language][difficulty]
+            wins_dict = self.wins_by_language[language][difficulty]
+        else:
+            if self.params is None or self.params[difficulty] is None:
+                raise ValueError(f"No data for {difficulty} rankings")
+            params = self.params[difficulty]
+            wins_dict = self.wins_by_difficulty[difficulty] if difficulty != 'all' else self.wins_count
 
-        # 2) Logistic Transform (LT)
-        # Shift so the average model has param=0 => logistic transform is 0.5 on average
-        mean_param = np.mean(self.params)
-        shifted_params = self.params - mean_param
-        lt_scores = 1.0 / (1.0 + np.exp(-shifted_params))  # 0-1 scale
-        lt_scores_0_10 = lt_scores * 10                    # 0-10 scale if desired
+        # Calculate EN scores
+        exp_params = np.exp(params)
+        sum_exp = np.sum(exp_params)
+        en_scores = exp_params / sum_exp
+        en_scores_0_10 = en_scores * 10
+
+        # Calculate LT scores
+        mean_param = np.mean(params)
+        shifted_params = params - mean_param
+        lt_scores = 1.0 / (1.0 + np.exp(-shifted_params))
+        lt_scores_0_10 = lt_scores * 10
+            
+        # Get the appropriate total_matches dictionary
+        if language:
+            total_matches_dict = self.total_matches[language][difficulty]
+        else:
+            total_matches_dict = self.total_matches[difficulty]
             
         rankings = pd.DataFrame({
             'llm': [self.idx_to_llm[i] for i in range(self.n_items)],
-            'score': self.params,
-            'wins': [self.wins_count[self.idx_to_llm[i]] for i in range(self.n_items)],
+            'score': params,
+            'wins': [wins_dict[self.idx_to_llm[i]] for i in range(self.n_items)],
+            'total_matches': [total_matches_dict[self.idx_to_llm[i]] for i in range(self.n_items)],
             'EN': en_scores_0_10,
             'LT': lt_scores_0_10,
         })
@@ -101,7 +205,7 @@ class LLMRanker:
             
         idx1 = self.llm_to_idx[llm1]
         idx2 = self.llm_to_idx[llm2]
-        prob, _ = choix.probabilities((idx1, idx2), self.params)
+        prob, _ = choix.probabilities((idx1, idx2), self.params['all'])
         return prob
 
 
@@ -123,6 +227,12 @@ def main(target_model, judge_model):
                     if 'llm_a' not in data or 'llm_b' not in data or 'analysis' not in data:
                         continue
                     
+                    # Extract difficulty and language
+                    difficulty = data.get('difficulty', 'easy')
+                    is_english = data.get('english', True)
+                    if difficulty not in ['easy', 'hard']:
+                        continue
+                        
                     # Extract the winner from analysis field
                     match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
                     if not match:
@@ -148,7 +258,7 @@ def main(target_model, judge_model):
                         print(f"Error: Invalid answer content in <answer> tag: {answer_content}")
                         continue
                         
-                    comparisons.append((llm1, llm2, winner))
+                    comparisons.append((llm1, llm2, winner, difficulty, is_english))
                     
                 except json.JSONDecodeError:
                     print("Error: Invalid JSON line encountered")
@@ -165,19 +275,42 @@ def main(target_model, judge_model):
     ranker = LLMRanker()
     ranker.fit(comparisons)
     
-    # Get rankings
-    rankings = ranker.get_rankings()
-    
-    # Convert __ back to / in model names
-    rankings['llm'] = rankings['llm'].str.replace('__', '/')
-    
-    print("\nRankings:")
-    print(rankings)
-    
-    # Print win counts
-    print("\nRaw win counts:")
-    for llm, wins in sorted(ranker.wins_count.items(), key=lambda x: x[1], reverse=True):
-        print(f"{llm}: {wins} wins")
+    # First print overall rankings
+    print("\n=== Overall Rankings ===")
+    for diff in ['all', 'easy', 'hard']:
+        try:
+            rankings = ranker.get_rankings(diff)
+            rankings['llm'] = rankings['llm'].str.replace('__', '/')
+            
+            print(f"\nRankings for {diff} questions:")
+            print(rankings)
+            
+            print(f"\nRaw win counts for {diff} questions:")
+            wins_dict = ranker.wins_by_difficulty[diff] if diff != 'all' else ranker.wins_count
+            for llm, wins in sorted(wins_dict.items(), key=lambda x: x[1], reverse=True):
+                print(f"{llm}: {wins} wins")
+        except ValueError as e:
+            print(f"\nNo data available for {diff} difficulty")
+            continue
+
+    # Then print language-specific rankings
+    for lang in ['english', 'japanese']:
+        print(f"\n=== {lang.title()} Rankings ===")
+        for diff in ['all', 'easy', 'hard']:
+            try:
+                rankings = ranker.get_rankings(diff, lang)
+                rankings['llm'] = rankings['llm'].str.replace('__', '/')
+                
+                print(f"\nRankings for {lang.title()}({diff}) questions:")
+                print(rankings)
+                
+                print(f"\nRaw win counts for {lang.title()}({diff}) questions:")
+                wins_dict = ranker.wins_by_language[lang][diff]
+                for llm, wins in sorted(wins_dict.items(), key=lambda x: x[1], reverse=True):
+                    print(f"{llm}: {wins} wins")
+            except ValueError as e:
+                print(f"\nNo data available for {lang} {diff} difficulty")
+                continue
     
     # Only save files if both model names are provided
     if target_model and judge_model:

@@ -1,0 +1,149 @@
+[1mdiff --git a/choix_analyzer.py b/choix_analyzer.py[m
+[1mindex 200c56d..918d7fc 100755[m
+[1m--- a/choix_analyzer.py[m
+[1m+++ b/choix_analyzer.py[m
+[36m@@ -16,21 +16,26 @@[m [mclass LLMRanker:[m
+         self.n_items = 0[m
+         self.params = None[m
+         self.wins_count = {}  # Track raw number of wins for each LLM[m
+[32m+[m[32m        self.llm_english = {}  # Store whether each LLM is English or not[m
+ [m
+[31m-    def process_comparisons(self, comparisons: List[Tuple[str, str, str, str]]):[m
+[32m+[m[32m    def process_comparisons(self, comparisons: List[Tuple[str, str, str, str, bool]]):[m
+         """[m
+         Process raw comparison data into format needed for choix.[m
+         [m
+         Args:[m
+[31m-            comparisons: List of tuples (llm1, llm2, winner, difficulty)[m
+[32m+[m[32m            comparisons: List of tuples (llm1, llm2, winner, difficulty, english)[m
+                         where winner is either "llm1" or "llm2"[m
+                         and difficulty is either "easy" or "hard"[m
+[32m+[m[32m                        and english is a boolean indicating if the comparison is in English[m
+         """[m
+         # First, build the mapping of LLM names to integers[m
+         unique_llms = set()[m
+[31m-        for llm1, llm2, _, _ in comparisons:[m
+[32m+[m[32m        for llm1, llm2, _, _, english in comparisons:[m
+             unique_llms.add(llm1)[m
+             unique_llms.add(llm2)[m
+[32m+[m[32m            # Store english value for both LLMs[m
+[32m+[m[32m            self.llm_english[llm1] = english[m
+[32m+[m[32m            self.llm_english[llm2] = english[m
+         [m
+         self.llm_to_idx = {llm: idx for idx, llm in enumerate(unique_llms)}[m
+         self.idx_to_llm = {idx: llm for llm, idx in self.llm_to_idx.items()}[m
+[36m@@ -41,7 +46,7 @@[m [mclass LLMRanker:[m
+         [m
+         # Convert comparisons to format needed by choix, keeping track of difficulty[m
+         processed_comparisons = {'all': [], 'easy': [], 'hard': []}[m
+[31m-        for llm1, llm2, winner, difficulty in comparisons:[m
+[32m+[m[32m        for llm1, llm2, winner, difficulty, _ in comparisons:[m
+             idx1 = self.llm_to_idx[llm1][m
+             idx2 = self.llm_to_idx[llm2][m
+             # Track wins for all categories[m
+[36m@@ -57,7 +62,7 @@[m [mclass LLMRanker:[m
+                 [m
+         return processed_comparisons[m
+ [m
+[31m-    def fit(self, comparisons: List[Tuple[str, str, str, str]]):[m
+[32m+[m[32m    def fit(self, comparisons: List[Tuple[str, str, str, str, bool]]):[m
+         """[m
+         Fit the Bradley-Terry model to the comparison data for all difficulties.[m
+         """[m
+[36m@@ -68,9 +73,14 @@[m [mclass LLMRanker:[m
+             'hard': choix.opt_pairwise(self.n_items, processed_data['hard']) if processed_data['hard'] else None[m
+         }[m
+         [m
+[31m-    def get_rankings(self, difficulty='all') -> pd.DataFrame:[m
+[32m+[m[32m    def get_rankings(self, difficulty='all', english=None) -> pd.DataFrame:[m
+         """[m
+         Returns a DataFrame with LLMs ranked by their scores and win counts for the specified difficulty.[m
+[32m+[m[41m        [m
+[32m+[m[32m        Args:[m
+[32m+[m[32m            difficulty: str, one of 'all', 'easy', 'hard'[m
+[32m+[m[32m            english: Optional[bool], if True return only English models, if False return only non-English models,[m
+[32m+[m[32m                    if None return all models[m
+         """[m
+         if self.params is None or self.params[difficulty] is None:[m
+             raise ValueError(f"Must fit model before getting rankings for {difficulty} difficulty")[m
+[36m@@ -99,7 +109,12 @@[m [mclass LLMRanker:[m
+             'wins': [self.wins_count[self.idx_to_llm[i]][difficulty] for i in range(self.n_items)],[m
+             'EN': en_scores_0_10,[m
+             'LT': lt_scores_0_10,[m
+[32m+[m[32m            'english': [self.llm_english[self.idx_to_llm[i]] for i in range(self.n_items)][m
+         })[m
+[32m+[m[41m        [m
+[32m+[m[32m        if english is not None:[m
+[32m+[m[32m            rankings = rankings[rankings['english'] == english][m
+[32m+[m[41m        [m
+         return rankings.sort_values('score', ascending=False).reset_index(drop=True)[m
+     [m
+     def predict_winner_probability(self, llm1: str, llm2: str, difficulty='all') -> float:[m
+[36m@@ -150,6 +165,7 @@[m [mdef main(target_model, judge_model):[m
+                     llm1 = data['llm_a'][m
+                     llm2 = data['llm_b'][m
+                     difficulty = data.get('difficulty', 'easy')  # Default to easy if not specified[m
+[32m+[m[32m                    english = data.get('english', True)  # Default to True if not specified[m
+                     [m
+                     if cleaned_answer == 'a':[m
+                         winner = llm1[m
+[36m@@ -159,7 +175,7 @@[m [mdef main(target_model, judge_model):[m
+                         print(f"Error: Invalid answer content in <answer> tag: {answer_content}")[m
+                         continue[m
+                         [m
+[31m-                    comparisons.append((llm1, llm2, winner, difficulty))[m
+[32m+[m[32m                    comparisons.append((llm1, llm2, winner, difficulty, english))[m
+                     [m
+                 except json.JSONDecodeError:[m
+                     print("Error: Invalid JSON line encountered")[m
+[36m@@ -176,13 +192,25 @@[m [mdef main(target_model, judge_model):[m
+     ranker = LLMRanker()[m
+     ranker.fit(comparisons)[m
+     [m
+[31m-    # Get rankings for all difficulties[m
+[32m+[m[32m    # Get rankings for all difficulties and English/non-English[m
+     rankings_all = ranker.get_rankings('all')[m
+     rankings_easy = ranker.get_rankings('easy')[m
+     rankings_hard = ranker.get_rankings('hard')[m
+     [m
+[32m+[m[32m    # Get English-only rankings[m
+[32m+[m[32m    rankings_all_en = ranker.get_rankings('all', english=True)[m
+[32m+[m[32m    rankings_easy_en = ranker.get_rankings('easy', english=True)[m
+[32m+[m[32m    rankings_hard_en = ranker.get_rankings('hard', english=True)[m
+[32m+[m[41m    [m
+[32m+[m[32m    # Get non-English rankings[m
+[32m+[m[32m    rankings_all_non_en = ranker.get_rankings('all', english=False)[m
+[32m+[m[32m    rankings_easy_non_en = ranker.get_rankings('easy', english=False)[m
+[32m+[m[32m    rankings_hard_non_en = ranker.get_rankings('hard', english=False)[m
+[32m+[m[41m    [m
+     # Convert __ back to / in model names for all rankings[m
+[31m-    for rankings in [rankings_all, rankings_easy, rankings_hard]:[m
+[32m+[m[32m    for rankings in [rankings_all, rankings_easy, rankings_hard,[m
+[32m+[m[32m                    rankings_all_en, rankings_easy_en, rankings_hard_en,[m
+[32m+[m[32m                    rankings_all_non_en, rankings_easy_non_en, rankings_hard_non_en]:[m
+         rankings['llm'] = rankings['llm'].str.replace('__', '/')[m
+     [m
+     print("\nAll Rankings:")[m
+[36m@@ -192,6 +220,22 @@[m [mdef main(target_model, judge_model):[m
+     print("\nHard Rankings:")[m
+     print(rankings_hard)[m
+     [m
+[32m+[m[32m    print("\nEnglish Rankings:")[m
+[32m+[m[32m    print("\nAll (English):")[m
+[32m+[m[32m    print(rankings_all_en)[m
+[32m+[m[32m    print("\nEasy (English):")[m
+[32m+[m[32m    print(rankings_easy_en)[m
+[32m+[m[32m    print("\nHard (English):")[m
+[32m+[m[32m    print(rankings_hard_en)[m
+[32m+[m[41m    [m
+[32m+[m[32m    print("\nNon-English Rankings:")[m
+[32m+[m[32m    print("\nAll (Non-English):")[m
+[32m+[m[32m    print(rankings_all_non_en)[m
+[32m+[m[32m    print("\nEasy (Non-English):")[m
+[32m+[m[32m    print(rankings_easy_non_en)[m
+[32m+[m[32m    print("\nHard (Non-English):")[m
+[32m+[m[32m    print(rankings_hard_non_en)[m
+[32m+[m[41m    [m
+     # Print win counts for all difficulties[m
+     for difficulty in ['all', 'easy', 'hard']:[m
+         print(f"\nRaw win counts ({difficulty}):")[m
