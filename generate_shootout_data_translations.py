@@ -43,8 +43,9 @@ def write_pair_settings(file_a, file_b):
         "llm_b": os.path.splitext(file_b)[0]
     }
 
-def generate_translation_pairs(target_file=None):
+def generate_translation_pairs(target_file=None, generate_base=False):
     """Generate translation pairs comparing target file against all other models."""
+    base_translations_dir = "base_translations"
     translations_dir = "translations"
     output_file = "latest_conversation_pairs.jsonl" if target_file else "base_conversation_pairs.jsonl"
     
@@ -56,25 +57,34 @@ def generate_translation_pairs(target_file=None):
             print("Operation cancelled.")
             return
     
-    # Load the dataset for settings
-    dataset = load_dataset("Aratako/Japanese-RP-Bench-testdata-SFW")
-    
-    # Get all JSONL files
-    jsonl_files = [f for f in os.listdir(translations_dir) if f.endswith('.jsonl')]
-    if not jsonl_files:
-        raise click.BadParameter(f"No JSONL files found in {translations_dir}")
     
     if target_file:
-        if target_file not in jsonl_files:
+        # Check if target file exists in conversations directory
+        if not os.path.exists(os.path.join(translations_dir, target_file)):
             raise click.BadParameter(f"File {target_file} not found in {translations_dir}")
-        # Generate pairs only for the target file
-        other_files = [f for f in jsonl_files if f != target_file]
-        pairs = [(target_file, other_file) for other_file in other_files]
+        # Get all files from base_conversations to compare against
+        base_files = [f for f in os.listdir(translations_dir) if f.endswith('.jsonl')]
+        pairs = [(target_file, base_file) for base_file in base_files]
+        print(f"Comparing {target_file} against {len(base_files)} files from {translations_dir}")
     else:
-        # Generate all possible pairs using combinations
+        # Determine which directory to use and get JSONL files
+        working_dir = base_translations_dir if generate_base else translations_dir
+        jsonl_files = [f for f in os.listdir(working_dir) if f.endswith('.jsonl')]
         pairs = list(combinations(jsonl_files, 2))
     
-    print(f"Found {len(jsonl_files)} files, generating {len(pairs)} pairs...")
+    # Process pairs and write to output
+    total_pairs = 0
+    with open(output_file, 'w', encoding='utf-8') as out_f:
+        for file_a, file_b in pairs:
+            if target_file:
+                # Load target file from conversations and comparison file from base_conversations
+                convs_a = load_jsonl(os.path.join(translations_dir, file_a))
+                convs_b = load_jsonl(os.path.join(base_translations_dir, file_b))
+            else:
+                # Load both files from the same working directory
+                convs_a = load_jsonl(os.path.join(working_dir, file_a))
+                convs_b = load_jsonl(os.path.join(working_dir, file_b))
+            
     
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
@@ -116,7 +126,7 @@ def generate_translation_pairs(target_file=None):
 def main(target_model, generate_base):
     """Generate conversation pairs for evaluation."""
     if generate_base:
-        generate_translation_pairs()
+        generate_translation_pairs(generate_base=True)
     else:
         if not target_model:
             raise click.UsageError("Either --target-model or --generate-base must be specified")
