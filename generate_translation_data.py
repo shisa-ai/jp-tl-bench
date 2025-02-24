@@ -36,10 +36,22 @@ class Translator(curator.LLM):
         """Parse the model response along with the input data into the desired output format."""
         # Find all matches of text between translation tags
         matches = re.findall(r'<translation>(.*?)</translation>', response, re.DOTALL)
-        # Use the last match if found, otherwise use "none" and print error
+        # Use the last match if found, otherwise check for analysis tag
         if not matches:
             print(f"Error: No translation tags found in response for input: {input['name']}")
-            translation = "none"
+            analysis_split = response.split('</translation_analysis>')
+            if len(analysis_split) > 1:
+                print(f"Found </translation_analysis> tag, using text after it for input: {input['name']}")
+                filtered_response = analysis_split[1]
+                # Try to find translation tags in the filtered response
+                filtered_matches = re.findall(r'<translation>(.*?)</translation>', filtered_response, re.DOTALL)
+                if filtered_matches:
+                    translation = filtered_matches[-1]
+                else:
+                    translation = filtered_response
+            else:
+                print(f"No </translation_analysis> tag found, using full response for input: {input['name']}")
+                translation = response
         else:
             translation = matches[-1]
         
