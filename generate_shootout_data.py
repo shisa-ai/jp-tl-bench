@@ -74,6 +74,18 @@ def generate_translation_pairs(target_file=None, generate_base=False):
     
     # Process pairs and write to output
     total_pairs = 0
+    file_lengths = {}
+    
+    # First pass to count items in each file
+    for file_a, file_b in pairs:
+        file_a_path = os.path.join(translations_dir if target_file else working_dir, file_a)
+        file_b_path = os.path.join(translations_dir if target_file else working_dir, file_b)
+        
+        if file_a not in file_lengths:
+            file_lengths[file_a] = len(load_jsonl(file_a_path))
+        if file_b not in file_lengths:
+            file_lengths[file_b] = len(load_jsonl(file_b_path))
+    
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
             if target_file:
@@ -85,17 +97,12 @@ def generate_translation_pairs(target_file=None, generate_base=False):
                 convs_a = load_jsonl(os.path.join(working_dir, file_a))
                 convs_b = load_jsonl(os.path.join(working_dir, file_b))
             
-    total_pairs = 0
-    with open(output_file, 'w', encoding='utf-8') as out_f:
-        for file_a, file_b in pairs:
-            path_a = os.path.join(translations_dir, file_a)
-            path_b = os.path.join(translations_dir, file_b)
-            
-            data_a = load_jsonl(path_a)
-            data_b = load_jsonl(path_b)
+            # Validate that files have equal length
+            if len(convs_a) != len(convs_b):
+                raise ValueError(f"Files have different lengths: {file_a} ({len(convs_a)} items) vs {file_b} ({len(convs_b)} items)")
             
             # For each translation pair in the files
-            for conv_a, conv_b in zip(data_a, data_b):
+            for conv_a, conv_b in zip(convs_a, convs_b):
                 # Create settings with unique ID and model names
                 settings = write_pair_settings(file_a, file_b)
                 
@@ -117,8 +124,10 @@ def generate_translation_pairs(target_file=None, generate_base=False):
                 # Write to output file
                 out_f.write(json.dumps(comparison_data, ensure_ascii=False) + '\n')
                 total_pairs += 1
-                
-    print(f"Generated {total_pairs} total pairs written to {output_file}")
+
+    items_per_file = next(iter(file_lengths.values()))  # Get count from first file
+    total_files = len(file_lengths)
+    print(f"Generated {total_pairs} total pairs written to {output_file} (comparing {total_files} files with {items_per_file} items each)")
 
 
 @click.command()
