@@ -104,7 +104,8 @@ def main(base_url, test_model_name, low_context, ultra_low_context, commercial_m
         backend_params = {
             "base_url": base_url,
             "max_requests_per_minute": 128,
-            "max_tokens_per_minute": 10000000
+            "max_tokens_per_minute": 10000000,
+            "request_timeout" : 120 #Sometimes models will go a little nuts on harder tasks, this timeout prevents that.
         }
         translator = Translator(
             model_name="hosted_vllm/" + test_model_name,

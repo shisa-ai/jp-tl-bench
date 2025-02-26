@@ -32,17 +32,17 @@ mamba activate shisa-translation-bench
 log "Starting eval script"
 
 if [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
-    python test_set_translator_any_model.py --base-url $OPENAI_URL  --test-model-name $MODEL  --ultra-low-context
+    CURATOR_DISABLE_CACHE=true python generate_translation_data.py --base-url $OPENAI_URL  --test-model-name $MODEL  --ultra-low-context
 elif [ "$LOW_CONTEXT" = "true" ]; then
-    python test_set_translator_any_model.py --base-url $OPENAI_URL  --test-model-name $MODEL  --low-context
+    CURATOR_DISABLE_CACHE=true python generate_translation_data.py --base-url $OPENAI_URL  --test-model-name $MODEL  --low-context
 else
-    python test_set_translator_any_model.py --base-url $OPENAI_URL  --test-model-name $MODEL 
+    CURATOR_DISABLE_CACHE=true python generate_translation_data.py --base-url $OPENAI_URL  --test-model-name $MODEL 
 fi
 
 log "Successfully generated conversation data. Generating shootout data..."
-python generate_shootout_data.py --target-model "$MODEL"
+CURATOR_DISABLE_CACHE=true python generate_shootout_data.py --target-model "$MODEL"
 log "Successfully generated shootout data. Evaluating results with Athene..."
-python translation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL"
+CURATOR_DISABLE_CACHE=true python translation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL"
 log "Successfully evaluated results. Running Bradley-Terry comparision..."
 python choix_analyzer.py --target-model "$MODEL" --judge-model "$JUDGE_MODEL"
 log "All done! Scores saved to scores/scores.jsonl"
