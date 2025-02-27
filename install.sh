@@ -16,7 +16,6 @@ fi
 . "$(dirname $(which $CONDA_COMMAND))/../etc/profile.d/conda.sh"
 . "$(dirname $(which $CONDA_COMMAND))/../etc/profile.d/mamba.sh" &> /dev/null
 
-
 # Env setup/start
 ENV_NAME="shisa-jp-tl-bench"
 if $CONDA_COMMAND env list | grep -q "^$ENV_NAME "; then
@@ -28,5 +27,14 @@ fi
 $CONDA_COMMAND activate $ENV_NAME
 
 # Install
+echo "Installing Python libs..."
 pip install uv
 uv pip install -r requirements.txt
+
+# Check if git-lfs is installed
+if ! command -v git-lfs &> /dev/null; then
+    echo "git-lfs not found, installing..."
+    $CONDA_COMMAND install git-lfs -y
+else
+    echo "git-lfs is already installed."
+fi
