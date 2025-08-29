@@ -1,2 +1,4 @@
-bespokelabs-curator
 choix
+openai
+python-dotenv
+tqdm

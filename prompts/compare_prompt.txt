@@ -28,6 +28,6 @@ Complete your evaluation with:
 [Brief summary of key differences and overall assessment]
 </evaluation_summary>
 
-<answer>(A or B ONLY, leave all commentary in translation_analysis)</answer>
+<answer>(A or B ONLY, leave all commentary in translation_analysis. This will be machine graded, so only answer with A or B here.)</answer>
 
 {{formatted_data}}
