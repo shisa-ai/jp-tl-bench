@@ -249,13 +249,8 @@ def load_comparisons_from_file(file_path):
 
                 The base model is always llm2 for our target model comparison file so we have to prefix 'base__' as well there
                 '''
-                # Add prefix to model names if from base set
-                if is_base_file:
-                    llm1 = f"base__{data['llm_a']}"
-                    llm2 = f"base__{data['llm_b']}"
-                else:
-                    llm1 = data['llm_a']
-                    llm2 = f"base__{data['llm_b']}"
+                llm1 = data['llm_a']
+                llm2 = data['llm_b']
 
                 
                 if cleaned_answer == 'a':
@@ -359,7 +354,7 @@ def main(target_model, judge_model):
         os.makedirs('scores', exist_ok=True)
         
         # Save scores
-        scores_file = f'scores/{safe_model_name}_rp_bench_scores.jsonl'
+        scores_file = f'scores/{safe_model_name}_tl_bench_scores.jsonl'
         
         with open(scores_file, 'w') as f:
             # Save overall rankings for each difficulty
@@ -388,7 +383,7 @@ def main(target_model, judge_model):
         print(f"\nScores saved to: {scores_file}")
         
         # Save raw answers for analysis
-        answers_file = f'scores/{safe_model_name}_rp_bench_answers.jsonl'
+        answers_file = f'scores/{safe_model_name}_tl_bench_answers.jsonl'
         shutil.move(file_path, answers_file)
         print(f"Results saved to: {answers_file}")
 

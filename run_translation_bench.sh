@@ -23,10 +23,20 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
 }
 
-# Initialize and activate conda/mamba
-source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
-source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
-mamba activate shisa-translation-bench
+# Initialize and activate conda/mamba (portable)
+if command -v mamba &> /dev/null; then
+    CONDA_COMMAND="mamba"
+elif command -v conda &> /dev/null; then
+    CONDA_COMMAND="conda"
+else
+    echo "Error: Neither mamba nor conda found. Please install one of them."
+    exit 1
+fi
+
+. "$(dirname $(which $CONDA_COMMAND))/../etc/profile.d/conda.sh"
+. "$(dirname $(which $CONDA_COMMAND))/../etc/profile.d/mamba.sh" &> /dev/null || true
+
+$CONDA_COMMAND activate shisa-jp-tl-bench
 
 # Change to working directory
 log "Starting eval script"

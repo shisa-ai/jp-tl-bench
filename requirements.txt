@@ -2,3 +2,7 @@ choix
 openai
 python-dotenv
 tqdm
+datasets
+numpy
+pandas
+click

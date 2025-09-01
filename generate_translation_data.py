@@ -22,7 +22,8 @@ class Translator:
             api_key = os.environ.get("GEMINI_API_KEY")
         elif base_url == "https://api.openai.com/v1":
             api_key = os.environ.get("OPENAI_API_KEY")
-
+        elif base_url == "https://api.deepinfra.com/v1/openai":
+            api_key = os.environ.get("DEEP_INFRA_KEY")
         self.client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -76,10 +77,14 @@ class Translator:
     def translate_item(self, item: dict) -> dict:
         """Translates a single item."""
         prompt_text = self.get_prompt(item)
-        chat_completion = self.client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt_text}],
-            model=self.model_name,
-        )
+        params = {
+            "messages": [{"role": "user", "content": prompt_text}],
+            "model": self.model_name,
+        }
+        if "gemini-2.5" in self.model_name:
+            params["reasoning_effort"] = "low"
+        
+        chat_completion = self.client.chat.completions.create(**params)
         response = chat_completion.choices[0].message.content
         parsed_result = self.parse(item, response, prompt_text)
         return parsed_result

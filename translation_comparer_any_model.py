@@ -1,5 +1,7 @@
 import os
 import json
+import random
+import time
 from datasets import Dataset
 from openai import OpenAI
 import click
@@ -16,6 +18,9 @@ class TranslationComparer:
             base_url=base_url,
             api_key=api_key,
         )
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.failed_items = []
 
     def prompt(self, input_data: dict) -> str:
         """Generate a prompt for comparison using the template from prompts/compare_prompt.txt and the translation data."""
@@ -37,15 +42,48 @@ class TranslationComparer:
         }
 
     def compare_item(self, item: dict) -> dict:
-        """Compares a single item."""
+        """Compares a single item with retry logic."""
         prompt_text = self.prompt(item)
-        chat_completion = self.client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt_text}],
-            model=self.model_name,
-        )
-        response = chat_completion.choices[0].message.content
-        parsed_result = self.parse(item, response)
-        return parsed_result
+        
+        max_retries = 5
+        base_delay = 1
+        
+        for attempt in range(max_retries + 1):
+            try:
+                chat_completion = self.client.chat.completions.create(
+                    messages=[{"role": "user", "content": prompt_text}],
+                    model=self.model_name,
+                )
+                
+                if not chat_completion.choices or chat_completion.choices[0].message.content is None:
+                    raise ValueError("Empty response from API")
+                
+                response = chat_completion.choices[0].message.content
+                
+                # Track token usage
+                if hasattr(chat_completion, 'usage') and chat_completion.usage:
+                    self.total_input_tokens += chat_completion.usage.prompt_tokens
+                    self.total_output_tokens += chat_completion.usage.completion_tokens
+                
+                parsed_result = self.parse(item, response)
+                return parsed_result
+                
+            except Exception as e:
+                error_msg = f"API error: {type(e).__name__}: {str(e)}"
+                if attempt == max_retries:
+                    # Track failed item
+                    failed_item = {
+                        "id": item.get("id", "unknown"),
+                        "name": item.get("name", "unknown"),
+                        "error": error_msg,
+                        "attempts": max_retries + 1
+                    }
+                    self.failed_items.append(failed_item)
+                    print(f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}")
+                    return None  # Return None for failed items
+                delay = base_delay * (2 ** attempt)
+                print(f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s...")
+                time.sleep(delay)
 
     def __call__(self, dataset: Dataset, max_workers: int) -> list:
         """Process the dataset in parallel and return a list of comparison results."""
@@ -61,7 +99,7 @@ class TranslationComparer:
 @click.option('--judge-model-name', '-j', required=True, help='Model name to use for judging the translations')
 @click.option('--test-model-name', '-t', help='Model name to test against base models')
 @click.option('--generate-base-set', is_flag=True, help='Generate base set comparisons instead of testing a specific model')
-@click.option('--max-workers', default=10, help='Number of worker threads for comparison.')
+@click.option('--max-workers', default=40, help='Number of worker threads for comparison.')
 def main(base_url, judge_model_name, test_model_name, generate_base_set, max_workers):
     """Compare translations between different models using a third LLM as analyzer.
 
@@ -93,6 +131,33 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set, max_wor
         for line in f:
             translation_pairs.append(json.loads(line))
 
+    # Validate that test model exists in the data when not generating base set
+    if not generate_base_set:
+        llm_a_models = set()
+        for pair in translation_pairs:
+            if "llm_a" in pair:
+                llm_a_models.add(pair["llm_a"])
+        
+        # Convert test model name to safe format for comparison
+        safe_test_model_name = test_model_name.replace("/", "__")
+        if safe_test_model_name not in llm_a_models:
+            raise ValueError(f"Model '{safe_test_model_name}' not found in llm_a position in {input_file}. Available llm_a models: {sorted(llm_a_models)}")
+
+    # Randomize positions to account for position bias
+    random.seed(42)  # Set seed for reproducibility
+    for pair in translation_pairs:
+        if random.random() < 0.5:
+            # Swap positions
+            pair["llm_a"], pair["llm_b"] = pair["llm_b"], pair["llm_a"]
+            # Update formatted_data to reflect the swap
+            lines = pair["formatted_data"].split('\n')
+            for i, line in enumerate(lines):
+                if line == "## Translation A":
+                    lines[i] = "## Translation B"
+                elif line == "## Translation B":
+                    lines[i] = "## Translation A"
+            pair["formatted_data"] = '\n'.join(lines)
+
     # Create dataset and shuffle it
     translations = Dataset.from_list(translation_pairs)
     translations = translations.shuffle(seed=42)  # Set seed for reproducibility
@@ -122,9 +187,28 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set, max_wor
             "analysis", f"{safe_test_model_name}.{safe_judge_model_name}.jsonl"
         )
 
+    # Filter out None results from failed items
+    successful_results = [item for item in results if item is not None]
+    
     with open(output_path, "w", encoding="utf-8") as f:
-        for item in results:
+        for item in successful_results:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    # Print summary
+    print(f"\nProcessing Summary:")
+    print(f"Total items: {len(results)}")
+    print(f"Successful: {len(successful_results)}")
+    print(f"Failed: {len(comparer.failed_items)}")
+    
+    if comparer.failed_items:
+        print(f"\nFailed items:")
+        for failed in comparer.failed_items:
+            print(f"  - {failed['name']} (ID: {failed['id']}): {failed['error']}")
+
+    print(f"\nToken Usage Summary:")
+    print(f"Input tokens: {comparer.total_input_tokens:,}")
+    print(f"Output tokens: {comparer.total_output_tokens:,}")
+    print(f"Total tokens: {comparer.total_input_tokens + comparer.total_output_tokens:,}")
 
 if __name__ == "__main__":
     main()

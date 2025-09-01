@@ -28,4 +28,4 @@ LOW_CONTEXT = Forces the model to use 8192 context window. Off by default. This 
 4. Generates a ranking based on the analysis using choix_analyzer, and saves the results file to scores/scores.jsonl
 
 # NOTES
-1. The mamba environment used is "shisa-translation-bench", which is activated in the script.
+1. The mamba environment used is "shisa-jp-tl-bench", which is created by install.sh and activated in the scripts.

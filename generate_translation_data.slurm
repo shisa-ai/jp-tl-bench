@@ -16,7 +16,7 @@ OPENAI_URL="${OPENAI_URL:-}"  # API URL for the model
 JUDGE_URL="${JUDGE_URL:-http://athenev2/v1}"  # Default judge API URL
 JUDGE_MODEL="${JUDGE_MODEL:-Nexusflow/Athene-V2-Chat}"  # Default judge model
 CURATOR_DISABLE_CACHE=true
-BASE_RESULTS_DIR="/fsx/ubuntu/evals/shisa-tl-bench/logs"
+BASE_RESULTS_DIR="${BASE_RESULTS_DIR:-logs}"
 
 echo "Running on node: $(hostname)"
 
@@ -51,16 +51,28 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 RESULTS_DIR="${BASE_RESULTS_DIR}/${SLURM_JOB_ID}-${TIMESTAMP}"
 mkdir -p "$RESULTS_DIR"
 
-# Symlink the slurm logs
-ln -s "/fsx/ubuntu/_logs/${SLURM_JOB_ID}-VLLM-multinode.log" "${RESULTS_DIR}/slurm.log"
+# Symlink the slurm logs if available on this cluster
+if [ -n "$SLURM_JOB_ID" ] && [ -f "/fsx/ubuntu/_logs/${SLURM_JOB_ID}-VLLM-multinode.log" ]; then
+    ln -s "/fsx/ubuntu/_logs/${SLURM_JOB_ID}-VLLM-multinode.log" "${RESULTS_DIR}/slurm.log" || true
+fi
 
-# Activate mamba environment
-source /fsx/ubuntu/miniforge3/etc/profile.d/conda.sh
-source /fsx/ubuntu/miniforge3/etc/profile.d/mamba.sh
-mamba activate /fsx/ubuntu/miniforge3/envs/vllm
+# Activate conda/mamba and vLLM environment (portable)
+if command -v mamba &> /dev/null; then
+    CONDA_COMMAND="mamba"
+elif command -v conda &> /dev/null; then
+    CONDA_COMMAND="conda"
+else
+    echo "Error: Neither mamba nor conda found. Please install one of them."
+    exit 1
+fi
+. "$(dirname $(which $CONDA_COMMAND))/../etc/profile.d/conda.sh"
+. "$(dirname $(which $CONDA_COMMAND))/../etc/profile.d/mamba.sh" &> /dev/null || true
+VLLM_ENV="${VLLM_ENV:-vllm}"
+$CONDA_COMMAND activate "$VLLM_ENV" || true
 
-# Change to working directory
-cd /fsx/ubuntu/evals/shisa-tl-bench
+# Change to working directory (override with WORKDIR or SLURM_SUBMIT_DIR)
+WORKDIR="${WORKDIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
+cd "$WORKDIR"
 
 # Calculate cluster size and parallelism
 TOTAL_GPUS=$((SLURM_NNODES * $(nvidia-smi -L | wc -l)))
@@ -173,8 +185,9 @@ if [ "${SLURM_PROCID}" -eq 0 ]; then
     kill $TAIL_PID 2>/dev/null  # Stop the log tail
     log "VLLM server is ready"
     
-    # Now that we're further down, activate shisa-translation-bench
-    mamba activate shisa-translation-bench
+    # Now that we're further down, activate bench env (portable)
+    BENCH_ENV="${BENCH_ENV:-shisa-jp-tl-bench}"
+    $CONDA_COMMAND activate "$BENCH_ENV" || true
     log "Starting eval script"
     curl http://localhost:8000/v1/models 2>&1
 
