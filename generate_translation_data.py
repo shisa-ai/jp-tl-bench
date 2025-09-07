@@ -24,6 +24,8 @@ class Translator:
             api_key = os.environ.get("OPENAI_API_KEY")
         elif base_url == "https://api.deepinfra.com/v1/openai":
             api_key = os.environ.get("DEEP_INFRA_KEY")
+        elif "api.anthropic.com" in base_url:
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
         self.client = OpenAI(
             base_url=base_url,
             api_key=api_key,
