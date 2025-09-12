@@ -246,11 +246,6 @@ def load_comparisons_from_file(file_path):
                         
                 cleaned_answer = cleaned_answer.lower()
                 
-                '''
-                In order to have proper handling of models that appear in the base set, we prefix base set models with a 'base__'
-
-                The base model is always llm2 for our target model comparison file so we have to prefix 'base__' as well there
-                '''
                 llm1 = data['llm_a']
                 llm2 = data['llm_b']
 
@@ -308,31 +303,28 @@ def display_rankings(console, rankings_df, title, target_model=None):
 
 
 @click.command()
-@click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
+@click.option('--target-model', '-m', required=True, help='Name of the model being evaluated')
 @click.option('--judge-model', '-j', required=True, help='Name of the model that did the judging')
 def main(target_model, judge_model):
     # Always load base set comparisons first
     comparisons = []
+    # Load base set comparisons
     safe_judge_name = judge_model.replace("/", "__")
-    base_files = [f for f in glob.glob(f'analysis/base_set.{safe_judge_name}.jsonl')]
-    if base_files:
-        print("\nProcessing base set comparisons...")
-        for base_file in base_files:
-            comparisons.extend(load_comparisons_from_file(base_file))
-    
-    # If target model and judge model are specified, load those comparisons too
-    if target_model and judge_model:
-        safe_model_name = target_model.replace("/", "__")
-        safe_judge_name = judge_model.replace("/", "__")
-        file_path = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
-        
-        if os.path.exists(file_path):
-            print(f"\nProcessing {file_path}...")
-            comparisons.extend(load_comparisons_from_file(file_path))
-        else:
-            print(f"Analysis file not found: {file_path}")
-            if not comparisons:  # If we don't even have base comparisons
-                exit(1)
+    base_file = f'analysis/base_set.{safe_judge_name}.jsonl'
+    if not os.path.exists(base_file):
+        print(f"Base set file not found: {base_file}")
+        exit(1)
+    print(f"\nProcessing base set file: {base_file}...")
+    comparisons = load_comparisons_from_file(base_file)
+
+    # Load target model comparisons
+    safe_model_name = target_model.replace("/", "__")
+    target_file = f'analysis/{safe_model_name}.{safe_judge_name}.jsonl'
+    if not os.path.exists(target_file):
+        print(f"Target model analysis file not found: {target_file}")
+        exit(1)
+    print(f"\nProcessing target model file: {target_file}...")
+    comparisons.extend(load_comparisons_from_file(target_file))
     
     if not comparisons:
         print("No valid comparisons found in any files")
@@ -406,7 +398,7 @@ def main(target_model, judge_model):
         
         # Save raw answers for analysis
         answers_file = f'scores/{safe_model_name}_tl_bench_answers.jsonl'
-        shutil.move(file_path, answers_file)
+        shutil.copy(target_file, answers_file)
         print(f"Results saved to: {answers_file}")
 
 if __name__ == "__main__":

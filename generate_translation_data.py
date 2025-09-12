@@ -13,19 +13,10 @@ load_dotenv()
 class Translator:
     """Translates text using a specified model."""
 
-    def __init__(self, model_name: str, base_url: str, low_context: bool = False, ultra_low_context: bool = False):
+    def __init__(self, model_name: str, base_url: str, api_key: str, low_context: bool = False, ultra_low_context: bool = False):
         self.model_name = model_name
         self.low_context = low_context
         self.ultra_low_context = ultra_low_context
-        api_key = None
-        if "generativelanguage.googleapis.com" in base_url:
-            api_key = os.environ.get("GEMINI_API_KEY")
-        elif base_url == "https://api.openai.com/v1":
-            api_key = os.environ.get("OPENAI_API_KEY")
-        elif base_url == "https://api.deepinfra.com/v1/openai":
-            api_key = os.environ.get("DEEP_INFRA_KEY")
-        elif "api.anthropic.com" in base_url:
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
         self.client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -44,6 +35,9 @@ class Translator:
         """Generate a prompt for translation using the appropriate template based on input language."""
         english = input_data.get("english", True)
         prompt_path = self.get_prompt_path(english)
+
+        if not os.path.exists(prompt_path):
+            raise SystemExit(f"Error: Missing prompt file: {prompt_path}. See README for setup.")
         
         with open(prompt_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
@@ -107,7 +101,8 @@ class Translator:
 @click.option('--low-context', is_flag=True, help='Use low context prompts')
 @click.option('--ultra-low-context', is_flag=True, help='Use ultra low context prompts (4096 tokens)')
 @click.option('--max-workers', default=5, help='Number of worker threads for translation.')
-def main(base_url, test_model_name, low_context, ultra_low_context, max_workers):
+@click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
+def main(base_url, test_model_name, low_context, ultra_low_context, max_workers, api_key_env):
     """Translate text using the specified model.
 
     Loads the translation test set from shisa-ai/bt_translation_test,
@@ -117,9 +112,11 @@ def main(base_url, test_model_name, low_context, ultra_low_context, max_workers)
     
     dataset = load_dataset("shisa-ai/bt_translation_test")["train"]
 
+    api_key = os.getenv(api_key_env)
     translator = Translator(
         model_name=test_model_name,
         base_url=base_url,
+        api_key=api_key,
         low_context=low_context,
         ultra_low_context=ultra_low_context
     )

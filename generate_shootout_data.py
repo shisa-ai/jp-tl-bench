@@ -35,15 +35,15 @@ def format_translation_pair(conv_a, conv_b):
     
     return output.getvalue()
 
-def write_pair_settings(file_a, file_b):
+def write_pair_settings(file_a, file_b, example_name):
     """Format the basic settings for the translation pair."""
     return {
-        "id": hashlib.md5(f"{file_a}_{file_b}".encode()).hexdigest(),
+        "id": hashlib.md5(f"{file_a}_{file_b}_{example_name}".encode()).hexdigest(),
         "llm_a": os.path.splitext(file_a)[0],
         "llm_b": os.path.splitext(file_b)[0]
     }
 
-def generate_translation_pairs(target_file=None, generate_base=False):
+def generate_translation_pairs(target_file=None):
     """Generate translation pairs comparing target file against all other models."""
     base_translations_dir = "base_translations"
     translations_dir = "translations"
@@ -108,7 +108,7 @@ def generate_translation_pairs(target_file=None, generate_base=False):
             # For each translation pair in the files
             for conv_a, conv_b in zip(convs_a, convs_b):
                 # Create settings with unique ID and model names
-                settings = write_pair_settings(file_a, file_b)
+                settings = write_pair_settings(file_a, file_b, conv_a['name'])
                 
                 # Format both translations into a singlemarkdown document
                 formatted_data = format_translation_pair(conv_a, conv_b)
@@ -140,7 +140,7 @@ def generate_translation_pairs(target_file=None, generate_base=False):
 def main(target_model, generate_base):
     """Generate conversation pairs for evaluation."""
     if generate_base:
-        generate_translation_pairs(generate_base=True)
+        generate_translation_pairs()
     else:
         if not target_model:
             raise click.UsageError("Either --target-model or --generate-base must be specified")
