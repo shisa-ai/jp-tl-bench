@@ -8,6 +8,8 @@ import json
 import re
 import os
 import shutil 
+from rich.console import Console
+from rich.table import Table
 
 class LLMRanker:
     def __init__(self):
@@ -273,14 +275,46 @@ def load_comparisons_from_file(file_path):
 
 
 
+def display_rankings(console, rankings_df, title, target_model=None):
+    """Displays rankings in a formatted table, highlighting the target model."""
+    table = Table(title=title)
+    
+    # Define columns
+    table.add_column("Rank", justify="right", style="cyan", no_wrap=True)
+    table.add_column("LLM", style="magenta")
+    table.add_column("Score", justify="right", style="green")
+    table.add_column("Wins", justify="right", style="blue")
+    table.add_column("Total Matches", justify="right", style="yellow")
+    table.add_column("EN", justify="right", style="red")
+    table.add_column("LT", justify="right", style="purple")
+
+    # Add rows
+    for index, row in rankings_df.iterrows():
+        llm_name = row['llm']
+        style = "on yellow" if target_model and target_model in llm_name else None
+        
+        table.add_row(
+            str(index + 1),
+            llm_name,
+            f"{row['score']:.4f}",
+            str(row['wins']),
+            str(row['total_matches']),
+            f"{row['EN']:.4f}",
+            f"{row['LT']:.4f}",
+            style=style
+        )
+        
+    console.print(table)
+
+
 @click.command()
 @click.option('--target-model', '-m', required=False, help='Name of the model being evaluated')
-@click.option('--judge-model', '-j', required=False, help='Name of the model did the judging')
-
+@click.option('--judge-model', '-j', required=True, help='Name of the model that did the judging')
 def main(target_model, judge_model):
     # Always load base set comparisons first
     comparisons = []
-    base_files = [f for f in glob.glob('analysis/base_set.*.jsonl')]
+    safe_judge_name = judge_model.replace("/", "__")
+    base_files = [f for f in glob.glob(f'analysis/base_set.{safe_judge_name}.jsonl')]
     if base_files:
         print("\nProcessing base set comparisons...")
         for base_file in base_files:
@@ -308,41 +342,29 @@ def main(target_model, judge_model):
     ranker = LLMRanker()
     ranker.fit(comparisons)
     
+    console = Console()
+
     # First print overall rankings
-    print("\n=== Overall Rankings ===")
+    console.print("\n=== Overall Rankings ===", style="bold underline")
     for diff in ['all', 'easy', 'hard']:
         try:
             rankings = ranker.get_rankings(diff)
             rankings['llm'] = rankings['llm'].str.replace('__', '/')
-            
-            print(f"\nRankings for {diff} questions:")
-            print(rankings)
-            
-            print(f"\nRaw win counts for {diff} questions:")
-            wins_dict = ranker.wins_by_difficulty[diff] if diff != 'all' else ranker.wins_count
-            for llm, wins in sorted(wins_dict.items(), key=lambda x: x[1], reverse=True):
-                print(f"{llm}: {wins} wins")
+            display_rankings(console, rankings, f"Rankings for {diff} questions", target_model)
         except ValueError as e:
-            print(f"\nNo data available for {diff} difficulty")
+            console.print(f"\nNo data available for {diff} difficulty", style="red")
             continue
 
     # Then print language-specific rankings
     for lang in ['english', 'japanese']:
-        print(f"\n=== {lang.title()} Rankings ===")
+        console.print(f"\n=== {lang.title()} Rankings ===", style="bold underline")
         for diff in ['all', 'easy', 'hard']:
             try:
                 rankings = ranker.get_rankings(diff, lang)
                 rankings['llm'] = rankings['llm'].str.replace('__', '/')
-                
-                print(f"\nRankings for {lang.title()}({diff}) questions:")
-                print(rankings)
-                
-                print(f"\nRaw win counts for {lang.title()}({diff}) questions:")
-                wins_dict = ranker.wins_by_language[lang][diff]
-                for llm, wins in sorted(wins_dict.items(), key=lambda x: x[1], reverse=True):
-                    print(f"{llm}: {wins} wins")
+                display_rankings(console, rankings, f"Rankings for {lang.title()}({diff}) questions", target_model)
             except ValueError as e:
-                print(f"\nNo data available for {lang} {diff} difficulty")
+                console.print(f"\nNo data available for {lang} {diff} difficulty", style="red")
                 continue
     
     # Only save files if both model names are provided

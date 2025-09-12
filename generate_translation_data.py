@@ -82,6 +82,9 @@ class Translator:
         params = {
             "messages": [{"role": "user", "content": prompt_text}],
             "model": self.model_name,
+            "temperature": 0.1,
+            "top_p": 0.85,
+            "frequency_penalty": 0.25
         }
         if "gemini-2.5" in self.model_name:
             params["reasoning_effort"] = "low"

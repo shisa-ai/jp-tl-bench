@@ -6,3 +6,4 @@ datasets
 numpy
 pandas
 click
+rich

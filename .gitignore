@@ -10,6 +10,7 @@ scores/
 translations/
 base_conversation_pairs.jsonl
 latest_conversation_pairs.jsonl
+*.xml
 
 # C extensions
 *.so

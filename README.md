@@ -5,10 +5,10 @@
 
 ## How To Run Translation Bench
 
-### With Default Judge (Athene-v2 at its alias)
+### With Default Judge (gemini-2.5-flash)
 MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" ./run_translation_bench.sh
 
-### With Specified Judge (If you don't want to use Athene-v2)
+### With Specified Judge (If you don't want to use gemini-2.5-flash)
 MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://llama33/v1" JUDGE_MODEL="Nexusflow/Athene-V2-Chat" JUDGE_URL="http://athenev2/v1" ./run_translation_bench.sh
 
 ### With Low Context (If you need lower Context Length)
@@ -17,8 +17,8 @@ LOW_CONTEXT="true" MODEL="meta-llama/Llama-3.3-70B-Instruct" OPENAI_URL="http://
 Breakdown:
 MODEL = Model name in standard format. 
 OPENAI_URL = URL used by the model. (Probably localhost:8000/v1 in most cases)
-JUDGE_MODEL = Name of the judge model. Defaults to Athene-v2. 
-JUDGE_URL = Judge API URL. We recommend using only Athene-v2, as other models have given inconsistent results. 
+JUDGE_MODEL = Name of the judge model. Defaults to gemini-2.5-flash. 
+JUDGE_URL = Judge API URL. Defaults to the Google Generative Language API. 
 LOW_CONTEXT = Forces the model to use 8192 context window. Off by default. This will cause the model to use a simpler prompt. 
 
 # What It Does
@@ -27,5 +27,12 @@ LOW_CONTEXT = Forces the model to use 8192 context window. Off by default. This 
 3. Shows these translation pairs to the judge AI for evaluation, who rates them across several criteria and picks a winner. Analyses are saved to the analysis folder.
 4. Generates a ranking based on the analysis using choix_analyzer, and saves the results file to scores/scores.jsonl
 
-# NOTES
-1. The mamba environment used is "shisa-jp-tl-bench", which is created by install.sh and activated in the scripts.
+# Installation
+To set up the environment, first create and activate a mamba environment named `shisa-jp-tl-bench`.
+```bash
+mamba create -n shisa-jp-tl-bench python=3.10
+mamba activate shisa-jp-tl-bench
+```
+Then, install the required packages:
+```bash
+pip install -r requirements.txt

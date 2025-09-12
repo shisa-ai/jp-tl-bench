@@ -50,11 +50,16 @@ class TranslationComparer:
         
         for attempt in range(max_retries + 1):
             try:
-                chat_completion = self.client.chat.completions.create(
-                    messages=[{"role": "user", "content": prompt_text}],
-                    model=self.model_name,
-                )
+                call_params = {
+                    "messages": [{"role": "user", "content": prompt_text}],
+                    "model": self.model_name,
+                    "temperature": 0,
+                }
                 
+                if 'gemini-2.5' in self.model_name:
+                    call_params['reasoning_effort'] = 'low'
+                
+                chat_completion = self.client.chat.completions.create(**call_params)
                 if not chat_completion.choices or chat_completion.choices[0].message.content is None:
                     raise ValueError("Empty response from API")
                 
