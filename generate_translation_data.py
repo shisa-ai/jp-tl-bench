@@ -97,12 +97,12 @@ class Translator:
 
 @click.command()
 @click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
-@click.option('--test-model-name', '-t', required=True, help='Model name to use for translation')
+@click.option('--test-model', '-t', required=True, help='Model name to use for translation')
 @click.option('--low-context', is_flag=True, help='Use low context prompts')
 @click.option('--ultra-low-context', is_flag=True, help='Use ultra low context prompts (4096 tokens)')
 @click.option('--max-workers', default=5, help='Number of worker threads for translation.')
 @click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
-def main(base_url, test_model_name, low_context, ultra_low_context, max_workers, api_key_env):
+def main(base_url, test_model, low_context, ultra_low_context, max_workers, api_key_env):
     """Translate text using the specified model.
 
     Loads the translation test set from shisa-ai/bt_translation_test,
@@ -114,7 +114,7 @@ def main(base_url, test_model_name, low_context, ultra_low_context, max_workers,
 
     api_key = os.getenv(api_key_env)
     translator = Translator(
-        model_name=test_model_name,
+        model_name=test_model,
         base_url=base_url,
         api_key=api_key,
         low_context=low_context,
@@ -123,7 +123,7 @@ def main(base_url, test_model_name, low_context, ultra_low_context, max_workers,
 
     results = translator(dataset, max_workers=max_workers)
     
-    safe_model_name = test_model_name.replace("/", "__")
+    safe_model_name = test_model.replace("/", "__")
     output_path = os.path.join("translations", f"{safe_model_name}.jsonl")
     
     with open(output_path, "w", encoding="utf-8") as f:

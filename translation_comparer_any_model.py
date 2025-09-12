@@ -110,13 +110,13 @@ class TranslationComparer:
 
 @click.command()
 @click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
-@click.option('--judge-model-name', '-j', required=True, help='Model name to use for judging the translations')
-@click.option('--test-model-name', '-t', help='Model name to test against base models')
+@click.option('--judge-model', '-j', required=True, help='Model name to use for judging the translations')
+@click.option('--test-model', '-t', help='Model name to test against base models')
 @click.option('--generate-base-set', is_flag=True, help='Generate base set comparisons instead of testing a specific model')
 @click.option('--max-workers', default=40, help='Number of worker threads for comparison.')
 @click.option('--concurrency-limit', default=40, help='Max number of concurrent API requests.')
 @click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
-def main(base_url, judge_model_name, test_model_name, generate_base_set, max_workers, concurrency_limit, api_key_env):
+def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env):
     """Compare translations between different models using a third LLM as analyzer.
 
     Reads the translation pairs from the JSONL file, creates a dataset,
@@ -124,11 +124,11 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set, max_wor
     to a new JSONL file.
     """
 
-    if not test_model_name and not generate_base_set:
+    if not test_model and not generate_base_set:
         raise click.UsageError(
             "Either --test-model-name or --generate-base-set must be specified"
         )
-    if test_model_name and generate_base_set:
+    if test_model and generate_base_set:
         raise click.UsageError(
             "Cannot specify both --test-model-name and --generate-base-set"
         )
@@ -138,7 +138,7 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set, max_wor
         raise SystemExit("Error: Missing prompts/compare_prompt.txt. See README for setup.")
 
     # Create output directory if it doesn't exist
-    os.makedirs("analysis", exist_ok=True)
+    os.makedirs("scores", exist_ok=True)
 
     # Read translation pairs
     input_file = (
@@ -162,7 +162,7 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set, max_wor
                 llm_a_models.add(pair["llm_a"])
         
         # Convert test model name to safe format for comparison
-        safe_test_model_name = test_model_name.replace("/", "__")
+        safe_test_model_name = test_model.replace("/", "__")
         if safe_test_model_name not in llm_a_models:
             raise ValueError(f"Model '{safe_test_model_name}' not found in llm_a position in {input_file}. Available llm_a models: {sorted(llm_a_models)}")
 
@@ -189,22 +189,22 @@ def main(base_url, judge_model_name, test_model_name, generate_base_set, max_wor
     api_key = os.getenv(api_key_env)
 
     comparer = TranslationComparer(
-        model_name=judge_model_name, base_url=base_url, api_key=api_key, concurrency_limit=concurrency_limit
+        model_name=judge_model, base_url=base_url, api_key=api_key, concurrency_limit=concurrency_limit
     )
 
     results = comparer(translations, max_workers=max_workers)
 
     # Save analysis results
     if generate_base_set:
-        safe_judge_model_name = judge_model_name.replace("/", "__")
+        safe_judge_model = judge_model.replace("/", "__")
         output_path = os.path.join(
-            "analysis", f"base_set.{safe_judge_model_name}.jsonl"
+            "scores", f"base_set.{safe_judge_model}.jsonl"
         )
     else:
-        safe_test_model_name = test_model_name.replace("/", "__")
-        safe_judge_model_name = judge_model_name.replace("/", "__")
+        safe_test_model = test_model.replace("/", "__")
+        safe_judge_model = judge_model.replace("/", "__")
         output_path = os.path.join(
-            "analysis", f"{safe_test_model_name}.{safe_judge_model_name}.jsonl"
+            "scores", f"{safe_test_model}.{safe_judge_model}.jsonl"
         )
 
     # Filter out None results from failed items

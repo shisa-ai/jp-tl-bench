@@ -93,3 +93,21 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 -   **Raw Analysis**: Individual JSONL files containing the judge's reasoning for each comparison are saved in `analysis/`.
 -   **Scores**: The final rankings and scores are saved to `scores/<model_name>_tl_bench_scores.jsonl`.
 -   **Answers**: A copy of the raw analysis file is also saved to `scores/<model_name>_tl_bench_answers.jsonl` for archival purposes.
+
+## Utilities
+
+### Cleaning Analysis Files
+
+Over time, analysis files may accumulate invalid entries (e.g., malformed JSON, incorrect answer formats). You can clean these files using the `utils/clean_analysis_file.py` script. This script will read an analysis file, remove any invalid lines, and overwrite the original file with the cleaned version.
+
+**Usage:**
+
+```bash
+python utils/clean_analysis_file.py path/to/your/analysis_file.jsonl
+```
+
+**Example:**
+
+```bash
+python utils/clean_analysis_file.py analysis/base_set.gemini-2.5-flash.jsonl
+```

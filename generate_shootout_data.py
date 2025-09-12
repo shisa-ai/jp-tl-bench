@@ -43,14 +43,14 @@ def write_pair_settings(file_a, file_b, example_name):
         "llm_b": os.path.splitext(file_b)[0]
     }
 
-def generate_translation_pairs(target_file=None):
+def generate_translation_pairs(test_model_file=None):
     """Generate translation pairs comparing target file against all other models."""
     base_translations_dir = "base_translations"
     translations_dir = "translations"
-    output_file = "latest_conversation_pairs.jsonl" if target_file else "base_conversation_pairs.jsonl"
+    output_file = "latest_conversation_pairs.jsonl" if test_model_file else "base_conversation_pairs.jsonl"
     
     # Add warning and confirmation for base_conversation_pairs.jsonl
-    if output_file == "base_conversation_pairs.jsonl":
+    if not test_model_file:
         print("\nWARNING: You are about to overwrite base_conversation_pairs.jsonl. These hold the pairs for all the models you'll be comparing against, and this could cause the program to stop working.")
         confirmation = input("Are you sure you want to continue? (yes/no): ")
         if confirmation.lower() != "yes":
@@ -58,14 +58,14 @@ def generate_translation_pairs(target_file=None):
             return
     
     
-    if target_file:
-        # Check if target file exists in translations directory
-        if not os.path.exists(os.path.join(translations_dir, target_file)):
-            raise click.BadParameter(f"File {target_file} not found in {translations_dir}")
+    if test_model_file:
+        # Check if test_model_file exists in translations directory
+        if not os.path.exists(os.path.join(translations_dir, test_model_file)):
+            raise click.BadParameter(f"File {test_model_file} not found in {translations_dir}")
         # Get all files from base_translations to compare against
         base_files = [f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl')]
-        pairs = [(target_file, base_file) for base_file in base_files]
-        print(f"Comparing {target_file} against {len(base_files)} files from {base_translations_dir}")
+        pairs = [(test_model_file, base_file) for base_file in base_files]
+        print(f"Comparing {test_model_file} against {len(base_files)} files from {base_translations_dir}")
     else:
         # Get all files from base_translations for pairwise comparison
         jsonl_files = [f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl')]
@@ -78,7 +78,7 @@ def generate_translation_pairs(target_file=None):
     
     # First pass to count items in each file
     for file_a, file_b in pairs:
-        if target_file:
+        if test_model_file:
             file_a_path = os.path.join(translations_dir, file_a)
             file_b_path = os.path.join(base_translations_dir, file_b)
         else:
@@ -92,7 +92,7 @@ def generate_translation_pairs(target_file=None):
     
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
-            if target_file:
+            if test_model_file:
                 # Load target file from translations and comparison file from base_translations
                 convs_a = load_jsonl(os.path.join(translations_dir, file_a))
                 convs_b = load_jsonl(os.path.join(base_translations_dir, file_b))
@@ -110,7 +110,7 @@ def generate_translation_pairs(target_file=None):
                 # Create settings with unique ID and model names
                 settings = write_pair_settings(file_a, file_b, conv_a['name'])
                 
-                # Format both translations into a singlemarkdown document
+                # Format both translations into a single markdown document
                 formatted_data = format_translation_pair(conv_a, conv_b)
                 
                 # Combine into final format
@@ -135,18 +135,19 @@ def generate_translation_pairs(target_file=None):
 
 
 @click.command()
-@click.option('--target-model', help='Target model to generate pairs for. If not specified, pairs will be generated between all models.')
+@click.option('--test-model', help='Test model to generate pairs for. If not specified, pairs will be generated between all models.')
 @click.option('--generate-base', is_flag=True, help='Generate base translation pairs. This will overwrite base_conversation_pairs.jsonl')
-def main(target_model, generate_base):
+def main(test_model, generate_base):
     """Generate conversation pairs for evaluation."""
     if generate_base:
+        # build all pairs in base_translations
         generate_translation_pairs()
     else:
-        if not target_model:
-            raise click.UsageError("Either --target-model or --generate-base must be specified")
+        if not test_model:
+            raise click.UsageError("Either --test-model or --generate-base must be specified")
         # Transform the model name into the target file path
-        target_file = target_model.replace('/', '__') + '.jsonl'
-        generate_translation_pairs(target_file)
+        test_model_file = test_model.replace('/', '__') + '.jsonl'
+        generate_translation_pairs(test_model_file)
 
 if __name__ == "__main__":
     main()

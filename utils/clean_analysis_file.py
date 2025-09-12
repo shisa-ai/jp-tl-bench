@@ -42,7 +42,7 @@ def clean_file(file_path):
 @click.command()
 @click.argument('file_path', type=click.Path(exists=True, dir_okay=False))
 def main(file_path):
-    """Cleans a specified .jsonl base set file by removing invalid entries."""
+    """Cleans a specified .jsonl analysis file by removing invalid entries."""
     clean_file(file_path)
 
 if __name__ == "__main__":

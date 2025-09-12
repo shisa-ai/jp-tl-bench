@@ -46,17 +46,17 @@ $CONDA_COMMAND activate shisa-jp-tl-bench
 log "Starting eval script"
 
 if [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
-    python generate_translation_data.py --base-url $OPENAI_URL --test-model-name $MODEL --api-key-env $MODEL_API_KEY_ENV --ultra-low-context
+    python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV --ultra-low-context
 elif [ "$LOW_CONTEXT" = "true" ]; then
-    python generate_translation_data.py --base-url $OPENAI_URL --test-model-name $MODEL --api-key-env $MODEL_API_KEY_ENV --low-context
+    python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV --low-context
 else
-    python generate_translation_data.py --base-url $OPENAI_URL --test-model-name $MODEL --api-key-env $MODEL_API_KEY_ENV
+    python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV
 fi
 
 log "Successfully generated conversation data. Generating shootout data..."
-python generate_shootout_data.py --target-model "$MODEL"
+python generate_shootout_data.py --test-model "$MODEL"
 log "Successfully generated shootout data. Evaluating results..."
-python translation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model-name "$JUDGE_MODEL" --test-model-name "$MODEL" --api-key-env "$JUDGE_API_KEY_ENV"
+python translation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model "$JUDGE_MODEL" --test-model "$MODEL" --api-key-env "$JUDGE_API_KEY_ENV"
 log "Successfully evaluated results. Running Bradley-Terry comparision..."
-python choix_analyzer.py --target-model "$MODEL" --judge-model "$JUDGE_MODEL"
+python choix_analyzer.py --test-model "$MODEL" --judge-model "$JUDGE_MODEL"
 log "All done! Scores saved to scores/scores.jsonl"
