@@ -310,7 +310,7 @@ def main(test_model, judge_model):
     comparisons = []
     # Load base set comparisons
     safe_judge_name = judge_model.replace("/", "__")
-    base_file = f'base_sets/base_set.{safe_judge_name}.jsonl'
+    base_file = f'scores/base_set.{safe_judge_name}.jsonl'
     if not os.path.exists(base_file):
         print(f"Base set file not found: {base_file}")
         exit(1)

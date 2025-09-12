@@ -15,7 +15,7 @@
 14. Standardized command line argument names across files.
 15. Make it so we save analysis files in "scores" instead of "analysis", saving a redundant copy that was also a common point of failure.
 16. Renamed "analysis" to "base_sets".
-
+17. Removed command line option to set special results directory for scores. It was redundant and not needed.
 
 ### TODO
 1. Allow easy adding to base set.
