@@ -198,7 +198,7 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
     if generate_base_set:
         safe_judge_model = judge_model.replace("/", "__")
         output_path = os.path.join(
-            "scores", f"base_set.{safe_judge_model}.jsonl"
+            "base_sets", f"base_set.{safe_judge_model}.jsonl"
         )
     else:
         safe_test_model = test_model.replace("/", "__")
