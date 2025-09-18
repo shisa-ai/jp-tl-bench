@@ -8,8 +8,12 @@ import json
 import re
 import os
  
-from rich.console import Console
-from rich.table import Table
+try:
+    from rich.console import Console
+    from rich.table import Table
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
 
 class LLMRanker:
     def __init__(self):
@@ -217,6 +221,7 @@ def load_comparisons_from_file(file_path):
     comparisons = []
     # Check if this is a base set file
     is_base_file = 'base_set.' in file_path
+    skipped_missing_answer = 0
     
     with open(file_path, 'r') as f:
         for line in f:
@@ -235,6 +240,7 @@ def load_comparisons_from_file(file_path):
                 # Extract the winner from analysis field
                 match = re.search(r'<answer>(.*?)</answer>', data['analysis'])
                 if not match:
+                    skipped_missing_answer += 1
                     continue
                         
                 answer_content = match.group(1)
@@ -266,40 +272,57 @@ def load_comparisons_from_file(file_path):
             except Exception as e:
                 print(f"Error processing line: {str(e)}")
                 continue
+    
+    if skipped_missing_answer > 0:
+        print(f"Skipped {skipped_missing_answer} pairs due to missing <answer> tags in {file_path}")
+    
     return comparisons
 
 
 
 def display_rankings(console, rankings_df, title, target_model=None):
     """Displays rankings in a formatted table, highlighting the target model."""
-    table = Table(title=title)
-    
-    # Define columns
-    table.add_column("Rank", justify="right", style="cyan", no_wrap=True)
-    table.add_column("LLM", style="magenta")
-    table.add_column("Score", justify="right", style="green")
-    table.add_column("Wins", justify="right", style="blue")
-    table.add_column("Total Matches", justify="right", style="yellow")
-    table.add_column("EN", justify="right", style="red")
-    table.add_column("LT", justify="right", style="purple")
+    if RICH_AVAILABLE and console:
+        table = Table(title=title)
+        
+        # Define columns
+        table.add_column("Rank", justify="right", style="cyan", no_wrap=True)
+        table.add_column("LLM", style="magenta")
+        table.add_column("Score", justify="right", style="green")
+        table.add_column("Wins", justify="right", style="blue")
+        table.add_column("Total Matches", justify="right", style="yellow")
+        table.add_column("EN", justify="right", style="red")
+        table.add_column("LT", justify="right", style="purple")
 
-    # Add rows
-    for index, row in rankings_df.iterrows():
-        llm_name = row['llm']
-        style = "on yellow" if target_model and target_model in llm_name else None
+        # Add rows
+        for index, row in rankings_df.iterrows():
+            llm_name = row['llm']
+            style = "on yellow" if target_model and target_model in llm_name else None
+            
+            table.add_row(
+                str(index + 1),
+                llm_name,
+                f"{row['score']:.4f}",
+                str(row['wins']),
+                str(row['total_matches']),
+                f"{row['EN']:.4f}",
+                f"{row['LT']:.4f}",
+                style=style
+            )
+            
+        console.print(table)
+    else:
+        # Plain text fallback
+        print(f"\n{title}")
+        print("=" * len(title))
+        print(f"{'Rank':<4} {'LLM':<30} {'Score':<8} {'Wins':<6} {'Matches':<8} {'EN':<8} {'LT':<8}")
+        print("-" * 72)
         
-        table.add_row(
-            str(index + 1),
-            llm_name,
-            f"{row['score']:.4f}",
-            str(row['wins']),
-            str(row['total_matches']),
-            f"{row['EN']:.4f}",
-            f"{row['LT']:.4f}",
-            style=style
-        )
-        
-    console.print(table)
+        for index, row in rankings_df.iterrows():
+            llm_name = row['llm']
+            highlight = " <-- TARGET" if target_model and target_model in llm_name else ""
+            
+            print(f"{index + 1:<4} {llm_name:<30} {row['score']:<8.4f} {row['wins']:<6} {row['total_matches']:<8} {row['EN']:<8.4f} {row['LT']:<8.4f}{highlight}")
 
 
 @click.command()
@@ -334,29 +357,41 @@ def main(test_model, judge_model):
     ranker = LLMRanker()
     ranker.fit(comparisons)
     
-    console = Console()
+    console = Console() if RICH_AVAILABLE else None
 
     # First print overall rankings
-    console.print("\n=== Overall Rankings ===", style="bold underline")
+    if RICH_AVAILABLE and console:
+        console.print("\n=== Overall Rankings ===", style="bold underline")
+    else:
+        print("\n=== Overall Rankings ===")
     for diff in ['all', 'easy', 'hard']:
         try:
             rankings = ranker.get_rankings(diff)
             rankings['llm'] = rankings['llm'].str.replace('__', '/')
             display_rankings(console, rankings, f"Rankings for {diff} questions", test_model)
         except ValueError as e:
-            console.print(f"\nNo data available for {diff} difficulty", style="red")
+            if RICH_AVAILABLE and console:
+                console.print(f"\nNo data available for {diff} difficulty", style="red")
+            else:
+                print(f"\nNo data available for {diff} difficulty")
             continue
 
     # Then print language-specific rankings
     for lang in ['english', 'japanese']:
-        console.print(f"\n=== {lang.title()} Rankings ===", style="bold underline")
+        if RICH_AVAILABLE and console:
+            console.print(f"\n=== {lang.title()} Rankings ===", style="bold underline")
+        else:
+            print(f"\n=== {lang.title()} Rankings ===")
         for diff in ['all', 'easy', 'hard']:
             try:
                 rankings = ranker.get_rankings(diff, lang)
                 rankings['llm'] = rankings['llm'].str.replace('__', '/')
                 display_rankings(console, rankings, f"Rankings for {lang.title()}({diff}) questions", test_model)
             except ValueError as e:
-                console.print(f"\nNo data available for {lang} {diff} difficulty", style="red")
+                if RICH_AVAILABLE and console:
+                    console.print(f"\nNo data available for {lang} {diff} difficulty", style="red")
+                else:
+                    print(f"\nNo data available for {lang} {diff} difficulty")
                 continue
     
     # Only save files if both model names are provided

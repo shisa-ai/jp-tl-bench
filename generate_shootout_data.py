@@ -3,7 +3,6 @@ import json
 from itertools import combinations
 import hashlib
 from io import StringIO
-from datasets import load_dataset
 import click
 
 def load_jsonl(file_path):
@@ -43,17 +42,15 @@ def write_pair_settings(file_a, file_b, example_name):
         "llm_b": os.path.splitext(file_b)[0]
     }
 
-def generate_translation_pairs(test_model_file=None):
+def generate_translation_pairs(test_model_file=None, force=False):
     """Generate translation pairs comparing target file against all other models."""
     base_translations_dir = "base_translations"
     translations_dir = "translations"
     output_file = "latest_conversation_pairs.jsonl" if test_model_file else "base_conversation_pairs.jsonl"
     
     # Add warning and confirmation for base_conversation_pairs.jsonl
-    if not test_model_file:
-        print("\nWARNING: You are about to overwrite base_conversation_pairs.jsonl. These hold the pairs for all the models you'll be comparing against, and this could cause the program to stop working.")
-        confirmation = input("Are you sure you want to continue? (yes/no): ")
-        if confirmation.lower() != "yes":
+    if not test_model_file and not force:
+        if not click.confirm("\nWARNING: You are about to overwrite base_conversation_pairs.jsonl. These hold the pairs for all the models you'll be comparing against, and this could cause the program to stop working.\n\nAre you sure you want to continue?"):
             print("Operation cancelled.")
             return
     
@@ -105,8 +102,28 @@ def generate_translation_pairs(test_model_file=None):
             if len(convs_a) != len(convs_b):
                 raise ValueError(f"Files have different lengths: {file_a} ({len(convs_a)} items) vs {file_b} ({len(convs_b)} items)")
             
-            # For each translation pair in the files
-            for conv_a, conv_b in zip(convs_a, convs_b):
+            # Create dictionaries indexed by name for proper matching
+            convs_a_dict = {item['name']: item for item in convs_a}
+            convs_b_dict = {item['name']: item for item in convs_b}
+            
+            # Validate that all names match between files
+            names_a = set(convs_a_dict.keys())
+            names_b = set(convs_b_dict.keys())
+            
+            if names_a != names_b:
+                missing_in_a = names_b - names_a
+                missing_in_b = names_a - names_b
+                error_msg = f"Item names don't match between files {file_a} and {file_b}."
+                if missing_in_a:
+                    error_msg += f" Missing in {file_a}: {sorted(missing_in_a)}"
+                if missing_in_b:
+                    error_msg += f" Missing in {file_b}: {sorted(missing_in_b)}"
+                raise ValueError(error_msg)
+            
+            # For each translation pair, match by name
+            for name in sorted(names_a):  # Sort for consistent ordering
+                conv_a = convs_a_dict[name]
+                conv_b = convs_b_dict[name]
                 # Create settings with unique ID and model names
                 settings = write_pair_settings(file_a, file_b, conv_a['name'])
                 
@@ -137,17 +154,18 @@ def generate_translation_pairs(test_model_file=None):
 @click.command()
 @click.option('--test-model', help='Test model to generate pairs for. If not specified, pairs will be generated between all models.')
 @click.option('--generate-base', is_flag=True, help='Generate base translation pairs. This will overwrite base_conversation_pairs.jsonl')
-def main(test_model, generate_base):
+@click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompts for automation/CI')
+def main(test_model, generate_base, yes):
     """Generate conversation pairs for evaluation."""
     if generate_base:
         # build all pairs in base_translations
-        generate_translation_pairs()
+        generate_translation_pairs(force=yes)
     else:
         if not test_model:
             raise click.UsageError("Either --test-model or --generate-base must be specified")
         # Transform the model name into the target file path
         test_model_file = test_model.replace('/', '__') + '.jsonl'
-        generate_translation_pairs(test_model_file)
+        generate_translation_pairs(test_model_file, force=yes)
 
 if __name__ == "__main__":
     main()

@@ -1,6 +1,8 @@
 import click
 import os
 import json
+import tempfile
+import fcntl
 from collections import Counter
 
 try:
@@ -236,24 +238,57 @@ def add(judge, input_file, yes):
             return
 
     try:
-        with open(input_file, 'r', encoding='utf-8') as infile, open(base_set_file, 'a', encoding='utf-8') as outfile:
-            count = 0
-            for line in infile:
-                # Basic validation to ensure it's a JSON line
-                try:
-                    json.loads(line)
-                    outfile.write(line)
-                    count += 1
-                except json.JSONDecodeError:
-                    if console:
-                        console.print(f"[yellow]Warning:[/] Skipping malformed line in {input_file}: {line.strip()}")
-                    else:
-                        print(f"Warning: Skipping malformed line in {input_file}: {line.strip()}")
+        # Use file locking to ensure atomic operations
+        with open(base_set_file, 'a+', encoding='utf-8') as lockfile:
+            # Acquire exclusive lock
+            fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
+            
+            try:
+                # Load existing IDs for deduplication
+                existing_ids = set()
+                lockfile.seek(0)  # Go to beginning to read existing content
+                for line in lockfile:
+                    try:
+                        data = json.loads(line)
+                        if 'id' in data:
+                            existing_ids.add(data['id'])
+                    except json.JSONDecodeError:
+                        continue
+                
+                # Process input file and append new entries
+                with open(input_file, 'r', encoding='utf-8') as infile:
+                    count = 0
+                    duplicates_skipped = 0
+                    for line in infile:
+                        # Basic validation to ensure it's a JSON line
+                        try:
+                            data = json.loads(line)
+                            # Check for duplicate ID
+                            if 'id' in data and data['id'] in existing_ids:
+                                duplicates_skipped += 1
+                                continue
+                            # Add new ID to set and write line
+                            if 'id' in data:
+                                existing_ids.add(data['id'])
+                            lockfile.write(line)
+                            count += 1
+                        except json.JSONDecodeError:
+                            if console:
+                                console.print(f"[yellow]Warning:[/] Skipping malformed line in {input_file}: {line.strip()}")
+                            else:
+                                print(f"Warning: Skipping malformed line in {input_file}: {line.strip()}")
+            finally:
+                # Lock is automatically released when file is closed
+                pass
         
         if console:
             console.print(f"[bold green]Success:[/] Added {count} new entries to {base_set_file}")
+            if duplicates_skipped > 0:
+                console.print(f"[yellow]Info:[/] Skipped {duplicates_skipped} duplicate entries (based on ID)")
         else:
             print(f"Success: Added {count} new entries to {base_set_file}")
+            if duplicates_skipped > 0:
+                print(f"Info: Skipped {duplicates_skipped} duplicate entries (based on ID)")
 
     except Exception as e:
         if console:
@@ -361,21 +396,35 @@ def remove(judge, model, yes):
     original_count = 0
 
     try:
-        with open(base_set_file, 'r', encoding='utf-8') as infile, open(temp_file, 'w', encoding='utf-8') as outfile:
-            for line in infile:
-                original_count += 1
-                try:
-                    data = json.loads(line)
-                    if data.get('llm_a') == safe_model_name or data.get('llm_b') == safe_model_name:
-                        removed_count += 1
-                    else:
-                        outfile.write(line)
-                except json.JSONDecodeError:
-                    # Keep malformed lines as they are
-                    outfile.write(line)
-
-        # Replace the original file with the temporary one
-        os.replace(temp_file, base_set_file)
+        # Use file locking for atomic remove operation
+        with open(base_set_file, 'r+', encoding='utf-8') as lockfile:
+            # Acquire exclusive lock
+            fcntl.flock(lockfile.fileno(), fcntl.LOCK_EX)
+            
+            try:
+                # Create temporary file for atomic replacement
+                with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, 
+                                               dir=os.path.dirname(base_set_file)) as temp_file:
+                    temp_file_path = temp_file.name
+                    
+                    lockfile.seek(0)  # Go to beginning to read
+                    for line in lockfile:
+                        original_count += 1
+                        try:
+                            data = json.loads(line)
+                            if data.get('llm_a') == safe_model_name or data.get('llm_b') == safe_model_name:
+                                removed_count += 1
+                            else:
+                                temp_file.write(line)
+                        except json.JSONDecodeError:
+                            # Keep malformed lines as they are
+                            temp_file.write(line)
+                
+                # Atomically replace the original file
+                os.replace(temp_file_path, base_set_file)
+            finally:
+                # Lock is automatically released when file is closed
+                pass
 
         if console:
             if removed_count > 0:
@@ -396,8 +445,8 @@ def remove(judge, model, yes):
         else:
             print(f"An error occurred: {e}")
         # Clean up the temp file if an error occurs
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
+        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
 
 if __name__ == '__main__':
     cli()

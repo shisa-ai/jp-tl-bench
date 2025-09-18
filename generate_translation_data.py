@@ -1,5 +1,7 @@
 import os
 import json
+import random
+import time
 from datasets import Dataset, load_dataset
 from openai import OpenAI
 import click
@@ -7,13 +9,14 @@ import re
 from dotenv import load_dotenv
 from tqdm import tqdm
 import concurrent.futures
+import threading
 
 load_dotenv()
 
 class Translator:
     """Translates text using a specified model."""
 
-    def __init__(self, model_name: str, base_url: str, api_key: str, low_context: bool = False, ultra_low_context: bool = False):
+    def __init__(self, model_name: str, base_url: str, api_key: str, low_context: bool = False, ultra_low_context: bool = False, concurrency_limit: int = 5):
         self.model_name = model_name
         self.low_context = low_context
         self.ultra_low_context = ultra_low_context
@@ -21,6 +24,10 @@ class Translator:
             base_url=base_url,
             api_key=api_key,
         )
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.failed_items = []
+        self.semaphore = threading.BoundedSemaphore(concurrency_limit)
 
     def get_prompt_path(self, english: bool) -> str:
         """Determine which prompt file to use based on input language and context setting."""
@@ -71,22 +78,57 @@ class Translator:
         }
 
     def translate_item(self, item: dict) -> dict:
-        """Translates a single item."""
-        prompt_text = self.get_prompt(item)
-        params = {
-            "messages": [{"role": "user", "content": prompt_text}],
-            "model": self.model_name,
-            "temperature": 0.1,
-            "top_p": 0.85,
-            "frequency_penalty": 0.25
-        }
-        if "gemini-2.5" in self.model_name:
-            params["reasoning_effort"] = "low"
-        
-        chat_completion = self.client.chat.completions.create(**params)
-        response = chat_completion.choices[0].message.content
-        parsed_result = self.parse(item, response, prompt_text)
-        return parsed_result
+        """Translates a single item with retry logic and concurrency control."""
+        # Add jitter to spread out requests
+        time.sleep(random.uniform(0.1, 0.5))
+
+        with self.semaphore:
+            prompt_text = self.get_prompt(item)
+            
+            max_retries = 5
+            base_delay = 1
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    params = {
+                        "messages": [{"role": "user", "content": prompt_text}],
+                        "model": self.model_name,
+                        "temperature": 0.1,
+                        "top_p": 0.85,
+                        "frequency_penalty": 0.25
+                    }
+                    if "gemini-2.5" in self.model_name:
+                        params["reasoning_effort"] = "low"
+                    
+                    chat_completion = self.client.chat.completions.create(**params)
+                    if not chat_completion.choices or chat_completion.choices[0].message.content is None:
+                        raise ValueError("Empty response from API")
+                    
+                    response = chat_completion.choices[0].message.content
+                    
+                    # Track token usage
+                    if hasattr(chat_completion, 'usage') and chat_completion.usage:
+                        self.total_input_tokens += chat_completion.usage.prompt_tokens
+                        self.total_output_tokens += chat_completion.usage.completion_tokens
+                    
+                    parsed_result = self.parse(item, response, prompt_text)
+                    return parsed_result
+                    
+                except Exception as e:
+                    error_msg = f"API error: {type(e).__name__}: {str(e)}"
+                    if attempt == max_retries:
+                        # Track failed item
+                        failed_item = {
+                            "name": item.get("name", "unknown"),
+                            "error": error_msg,
+                            "attempts": max_retries + 1
+                        }
+                        self.failed_items.append(failed_item)
+                        print(f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}")
+                        return None  # Return None for failed items
+                    delay = base_delay * (2 ** attempt)
+                    print(f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s...")
+                    time.sleep(delay)
 
     def __call__(self, dataset: Dataset, max_workers: int) -> list:
         """Process the dataset in parallel and return a list of translation results."""
@@ -101,8 +143,9 @@ class Translator:
 @click.option('--low-context', is_flag=True, help='Use low context prompts')
 @click.option('--ultra-low-context', is_flag=True, help='Use ultra low context prompts (4096 tokens)')
 @click.option('--max-workers', default=5, help='Number of worker threads for translation.')
+@click.option('--concurrency-limit', default=5, help='Max number of concurrent API requests.')
 @click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
-def main(base_url, test_model, low_context, ultra_low_context, max_workers, api_key_env):
+def main(base_url, test_model, low_context, ultra_low_context, max_workers, concurrency_limit, api_key_env):
     """Translate text using the specified model.
 
     Loads the translation test set from shisa-ai/bt_translation_test,
@@ -118,7 +161,8 @@ def main(base_url, test_model, low_context, ultra_low_context, max_workers, api_
         base_url=base_url,
         api_key=api_key,
         low_context=low_context,
-        ultra_low_context=ultra_low_context
+        ultra_low_context=ultra_low_context,
+        concurrency_limit=concurrency_limit
     )
 
     results = translator(dataset, max_workers=max_workers)
@@ -126,9 +170,32 @@ def main(base_url, test_model, low_context, ultra_low_context, max_workers, api_
     safe_model_name = test_model.replace("/", "__")
     output_path = os.path.join("translations", f"{safe_model_name}.jsonl")
     
+    # Filter out None results from failed items
+    successful_results = [item for item in results if item is not None]
+    
     with open(output_path, "w", encoding="utf-8") as f:
-        for item in results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        for item in successful_results:
+            try:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            except json.JSONDecodeError as e:
+                print(f"Error encoding JSON for item {item.get('name', 'unknown')}: {e}")
+                continue
+
+    # Print summary
+    print(f"\nProcessing Summary:")
+    print(f"Total items: {len(results)}")
+    print(f"Successful: {len(successful_results)}")
+    print(f"Failed: {len(translator.failed_items)}")
+    
+    if translator.failed_items:
+        print(f"\nFailed items:")
+        for failed in translator.failed_items:
+            print(f"  - {failed['name']}: {failed['error']}")
+
+    print(f"\nToken Usage Summary:")
+    print(f"Input tokens: {translator.total_input_tokens:,}")
+    print(f"Output tokens: {translator.total_output_tokens:,}")
+    print(f"Total tokens: {translator.total_input_tokens + translator.total_output_tokens:,}")
 
 
 if __name__ == "__main__":
