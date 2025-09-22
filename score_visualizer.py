@@ -54,7 +54,7 @@ def create_direction_table(scores_data: List[Tuple], title: str, console: Consol
     """Create a rich table for either EN->JA or JA->EN direction."""
     table = Table(title=title, show_header=True, header_style="bold magenta")
 
-    table.add_column("Model", style="cyan", no_wrap=False, width=60, overflow="fold")
+    table.add_column("Model", style="cyan", no_wrap=False, max_width=80, overflow="fold")
     table.add_column("Easy LT", justify="right", style="green", min_width=8)
     table.add_column("Hard LT", justify="right", style="yellow", min_width=8)
     table.add_column("Overall LT", justify="right", style="bold red", min_width=10)
