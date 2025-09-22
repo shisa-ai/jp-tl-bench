@@ -33,7 +33,7 @@ class TranslationComparer:
             prompt_template = f.read()
         return prompt_template.replace("{{formatted_data}}", input_data["formatted_data"])
 
-    def parse(self, input_data: dict, response: str) -> dict:
+    def parse(self, input_data: dict, response: str, judge_generation_config: dict, judge_model: str) -> dict:
         """Parse the model response along with the input data into the desired output format."""
         return {
             "name": input_data["name"],
@@ -44,6 +44,17 @@ class TranslationComparer:
             "llm_b": input_data["llm_b"],
             "formatted_data": input_data["formatted_data"],
             "analysis": response,
+            "judge_model": judge_model,
+            "judge_temperature": judge_generation_config.get("temperature"),
+            "judge_generation_config": judge_generation_config,
+            "llm_a_low_context": input_data.get("llm_a_low_context", False),
+            "llm_a_ultra_low_context": input_data.get("llm_a_ultra_low_context", False),
+            "llm_a_temperature": input_data.get("llm_a_temperature"),
+            "llm_a_generation_config": input_data.get("llm_a_generation_config"),
+            "llm_b_low_context": input_data.get("llm_b_low_context", False),
+            "llm_b_ultra_low_context": input_data.get("llm_b_ultra_low_context", False),
+            "llm_b_temperature": input_data.get("llm_b_temperature"),
+            "llm_b_generation_config": input_data.get("llm_b_generation_config"),
         }
 
     def compare_item(self, item: dict) -> dict:
@@ -64,22 +75,26 @@ class TranslationComparer:
                         "model": self.model_name,
                         "temperature": 0,
                     }
-                    
+
                     if 'gemini-2.5' in self.model_name:
                         call_params['reasoning_effort'] = 'low'
-                    
+
+                    # Create judge generation config for saving
+                    judge_generation_config = call_params.copy()
+                    judge_generation_config.pop("messages", None)  # Remove messages from config
+
                     chat_completion = self.client.chat.completions.create(**call_params)
                     if not chat_completion.choices or chat_completion.choices[0].message.content is None:
                         raise ValueError("Empty response from API")
-                    
+
                     response = chat_completion.choices[0].message.content
-                    
+
                     # Track token usage
                     if hasattr(chat_completion, 'usage') and chat_completion.usage:
                         self.total_input_tokens += chat_completion.usage.prompt_tokens
                         self.total_output_tokens += chat_completion.usage.completion_tokens
-                    
-                    parsed_result = self.parse(item, response)
+
+                    parsed_result = self.parse(item, response, judge_generation_config, self.model_name)
                     return parsed_result
                     
                 except Exception as e:

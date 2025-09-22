@@ -139,6 +139,14 @@ def generate_translation_pairs(test_model_file=None, force=False):
                     "name" : conv_a["name"],
                     "english": conv_a["english"],
                     "difficulty" : conv_a["difficulty"],
+                    "llm_a_low_context": conv_a.get("low_context", False),
+                    "llm_a_ultra_low_context": conv_a.get("ultra_low_context", False),
+                    "llm_a_temperature": conv_a.get("temperature"),
+                    "llm_a_generation_config": conv_a.get("generation_config"),
+                    "llm_b_low_context": conv_b.get("low_context", False),
+                    "llm_b_ultra_low_context": conv_b.get("ultra_low_context", False),
+                    "llm_b_temperature": conv_b.get("temperature"),
+                    "llm_b_generation_config": conv_b.get("generation_config"),
 
                 }
                 

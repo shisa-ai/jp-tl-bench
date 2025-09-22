@@ -96,6 +96,59 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 
 ## Utilities
 
+### Generate Translation Data with vLLM
+
+The `utils/generate_translation_data_with_vllm.sh` script provides a convenient way to generate translation data using a local vLLM server. It automatically starts a vLLM server with the specified model, waits for it to be ready, runs the translation generation, and then cleans up by shutting down the server.
+
+**Usage:**
+
+```bash
+./utils/generate_translation_data_with_vllm.sh <model_name>
+```
+
+**Example:**
+
+```bash
+./utils/generate_translation_data_with_vllm.sh shisa-ai/035-rakuten-2.0-mini-1.5b-v2new-dpo405b
+```
+
+Make sure the script is executable:
+
+```bash
+chmod +x utils/generate_translation_data_with_vllm.sh
+```
+
+This script is useful when you want to generate translation data for a single model without running the full benchmark pipeline.
+
+### Generate Translation Data Directly
+
+You can also run the translation generation script directly using `generate_translation_data.py`. This gives you more control over the process and allows you to use different API endpoints and models.
+
+**Usage:**
+
+```bash
+python generate_translation_data.py --base-url <api_url> --test-model <model_name> [OPTIONS]
+```
+
+**Required Options:**
+- `--base-url`: The API endpoint URL for your model
+- `--test-model`: The name of the model to use for translation
+
+**Optional Parameters:**
+- `--api-key-env`: Name of the environment variable containing the API key (defaults to `OPENAI_API_KEY`)
+- `--low-context`: Use prompts optimized for smaller context windows
+- `--ultra-low-context`: Use prompts optimized for very small context windows (4096 tokens)
+- `--max-workers`: Number of worker threads for translation (default: 5)
+- `--concurrency-limit`: Maximum number of concurrent API requests (default: 5)
+
+**Example:**
+
+```bash
+python generate_translation_data.py --base-url https://generativelanguage.googleapis.com/v1beta/openai/ --test-model gemini-2.5-pro --api-key-env GEMINI_API_KEY
+```
+
+This will generate translation data using Google's Gemini model and save the results to `translations/<model_name>.jsonl`.
+
 ### Cleaning Analysis Files
 
 Over time, analysis files may accumulate invalid entries (e.g., malformed JSON, incorrect answer formats). You can clean these files using the `utils/clean_analysis_file.py` script. This script will read an analysis file, remove any invalid lines, and overwrite the original file with the cleaned version.

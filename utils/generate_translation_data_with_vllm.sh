@@ -45,7 +45,7 @@ echo "vLLM server started successfully"
 
 # Run translation data generation
 echo "Running translation data generation..."
-python generate_translation_data.py --base-url "$OPENAI_URL" --test-model-name "$MODEL_NAME"
+python generate_translation_data.py --base-url "$OPENAI_URL" --test-model "$MODEL_NAME"
 
 # Clean up
 echo "Shutting down vLLM server..."
