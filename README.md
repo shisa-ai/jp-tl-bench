@@ -85,7 +85,7 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 ## Workflow
 
 1.  **Translate**: The script prompts the target model to translate a predefined set of ~70 English and Japanese text samples.
-2.  **Generate Pairs**: The new translations are paired up with existing translations from the base models in the frozen snapshot (by default `baseset/v1.0`) to create comparison pairs. `run_translation_bench.sh` automatically syncs from the snapshot directory (`BASESET_SNAPSHOT_DIR`) so every run is evaluated against the same anchor set.
+2.  **Generate Pairs**: The new translations are paired up with existing translations from the base models in the frozen snapshot (by default `baseset/v1.0`) to create comparison pairs. `generate_shootout_data.py` reads the anchor translations directly from `BASESET_SNAPSHOT_DIR/translations`, so every run is evaluated against the same anchor set.
 3.  **Judge**: The judge model evaluates each pair and picks a winner. The analysis for each comparison is saved to the `analysis/` directory.
 4.  **Rank**: The script analyzes the win/loss data using a Bradley-Terry model to calculate scores and generate rankings. 
 

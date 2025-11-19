@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os
 import json
 import random
@@ -124,13 +126,30 @@ class TranslationComparer:
 
 
 @click.command()
-@click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
-@click.option('--judge-model', '-j', required=True, help='Model name to use for judging the translations')
+@click.option(
+    '--base-url',
+    '-u',
+    default=os.getenv("JUDGE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+    show_default=True,
+    help='Base URL for the judge API endpoint (mirrors run_translation_bench.sh defaults).',
+)
+@click.option(
+    '--judge-model',
+    '-j',
+    default="gemini-2.5-flash",
+    show_default=True,
+    help='Model name to use for judging the translations (mirrors run_translation_bench.sh defaults).',
+)
 @click.option('--test-model', '-t', help='Model name to test against base models')
 @click.option('--generate-base-set', is_flag=True, help='Generate base set comparisons instead of testing a specific model')
 @click.option('--max-workers', default=40, help='Number of worker threads for comparison.')
 @click.option('--concurrency-limit', default=40, help='Max number of concurrent API requests.')
-@click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
+@click.option(
+    '--api-key-env',
+    default=os.getenv("JUDGE_API_KEY_ENV", "GEMINI_API_KEY"),
+    show_default=True,
+    help='Env var name that holds the judge API key (mirrors run_translation_bench.sh defaults).',
+)
 def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env):
     """Compare translations between different models using a third LLM as analyzer.
 

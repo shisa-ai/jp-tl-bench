@@ -5,6 +5,8 @@ import hashlib
 from io import StringIO
 import click
 
+BASESET_SNAPSHOT_DIR = os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")
+
 def load_jsonl(file_path):
     data = []
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -44,7 +46,7 @@ def write_pair_settings(file_a, file_b, example_name):
 
 def generate_translation_pairs(test_model_file=None, force=False):
     """Generate translation pairs comparing target file against all other models."""
-    base_translations_dir = "base_translations"
+    base_translations_dir = os.path.join(BASESET_SNAPSHOT_DIR, "translations")
     translations_dir = "translations"
     output_file = "latest_conversation_pairs.jsonl" if test_model_file else "base_conversation_pairs.jsonl"
     
@@ -53,8 +55,7 @@ def generate_translation_pairs(test_model_file=None, force=False):
         if not click.confirm("\nWARNING: You are about to overwrite base_conversation_pairs.jsonl. These hold the pairs for all the models you'll be comparing against, and this could cause the program to stop working.\n\nAre you sure you want to continue?"):
             print("Operation cancelled.")
             return
-    
-    
+
     if test_model_file:
         # Check if test_model_file exists in translations directory
         if not os.path.exists(os.path.join(translations_dir, test_model_file)):

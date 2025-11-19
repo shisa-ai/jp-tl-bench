@@ -77,18 +77,11 @@ Follow this checklist any time you want to benchmark a fresh translation dump ag
 1. **Generate your translation outputs**  
    Run the usual bench pipeline (e.g., `MODEL=... OPENAI_URL=... ./run_translation_bench.sh`) so that `translations/<safe_model>.jsonl` is produced. You can also call `generate_translation_data.py` directly if you need extra flags like `--low-context`.
 
-2. **Sync the snapshot into `base_translations/`**  
-   The shootout generator reads from `base_translations/`, so mirror the snapshot before creating pairs:
-   ```bash
-   rsync -a --delete baseset/v1.0/translations/ base_translations/
-   ```
-   This guarantees that every comparison uses the exact v1.0 anchors regardless of what lives elsewhere in the repo.
-
-3. **Create comparison pairs vs the anchors**  
+2. **Create comparison pairs vs the anchors**  
    ```bash
    python generate_shootout_data.py --test-model "$MODEL"
    ```
-   The command above rebuilds `latest_conversation_pairs.jsonl`, pairing your model against each snapshot reference.
+   The command above rebuilds `latest_conversation_pairs.jsonl`, pairing your model against each snapshot reference in `baseset/v1.0/translations/` (or whatever `BASESET_SNAPSHOT_DIR` points to).
 
 4. **Judge the pairs and archive the outputs**  
    ```bash

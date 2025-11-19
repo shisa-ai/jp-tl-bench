@@ -54,20 +54,6 @@ else
     python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV
 fi
 
-# Sync the anchor snapshot into base_translations so comparisons are tied to the frozen v1.0 set.
-if [ -d "$BASESET_SNAPSHOT_DIR/translations" ]; then
-    log "Syncing base translations from $BASESET_SNAPSHOT_DIR/translations/ into base_translations/..."
-    mkdir -p base_translations
-    if command -v rsync >/dev/null 2>&1; then
-        rsync -a --delete "$BASESET_SNAPSHOT_DIR/translations/" base_translations/
-    else
-        log "rsync not found; falling back to cp without deletion semantics."
-        cp -a "$BASESET_SNAPSHOT_DIR/translations/." base_translations/
-    fi
-else
-    log "WARNING: Snapshot translations dir $BASESET_SNAPSHOT_DIR/translations not found; using existing base_translations/."
-fi
-
 log "Successfully generated conversation data. Generating shootout data..."
 python generate_shootout_data.py --test-model "$MODEL"
 log "Successfully generated shootout data. Evaluating results..."
