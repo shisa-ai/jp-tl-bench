@@ -78,6 +78,11 @@ def find_base_set_file(judge):
     if os.path.exists(direct_match):
         return direct_match
 
+    # Next, check the frozen v1.0 snapshot in baseset/v1.0
+    snapshot_match = os.path.join("baseset", "v1.0", f"base_set.{judge}.jsonl")
+    if os.path.exists(snapshot_match):
+        return snapshot_match
+
     # If not found, search for files ending with the judge's name
     try:
         files = os.listdir('base_sets')

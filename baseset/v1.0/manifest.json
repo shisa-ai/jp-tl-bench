@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "description": "Baseline manifest for building the v1.0 anchor set.",
+  "models": [
+    { "model": "gemini-2.5-pro", "source": "base_translations/gemini-2.5-pro.jsonl" },
+    { "model": "gemini-2.5-flash", "source": "base_translations/gemini-2.5-flash.jsonl" },
+    { "model": "shisa-ai/shisa-v2-llama3.1-405b", "source": "translations/shisa-ai__shisa-v2-llama3.1-405b.jsonl" },
+    { "model": "Qwen/Qwen3-30B-A3B-Instruct-2507", "source": "translations/Qwen__Qwen3-30B-A3B-Instruct-2507.jsonl" },
+    { "model": "shisa-ai/shisa-v2-unphi4-14b", "source": "translations/shisa-ai__shisa-v2-unphi4-14b.jsonl" },
+    { "model": "openai/gpt-4o", "source": "base_translations/openai__gpt-4o.jsonl" },
+    { "model": "meta-llama/Llama-3.3-70B-Instruct", "source": "base_translations/meta-llama__Llama-3.3-70B-Instruct.jsonl" },
+    { "model": "nvidia/NVIDIA-Nemotron-Nano-12B-v2", "source": "translations/nvidia__NVIDIA-Nemotron-Nano-12B-v2.jsonl" },
+    { "model": "tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5", "source": "base_translations/tokyotech-llm__Llama-3.1-Swallow-8B-Instruct-v0.5.jsonl" },
+    { "model": "microsoft/phi-4", "source": "base_translations/microsoft__phi-4.jsonl" },
+    { "model": "cyberagent/Mistral-Nemo-Japanese-Instruct-2408", "source": "base_translations/cyberagent__Mistral-Nemo-Japanese-Instruct-2408.jsonl" },
+    { "model": "meta-llama/Llama-3.1-8B-Instruct", "source": "translations/meta-llama__Llama-3.1-8B-Instruct.jsonl" },
+    { "model": "Qwen/Qwen3-4B", "source": "base_translations/Qwen__Qwen3-4B.jsonl" },
+    { "model": "microsoft/Phi-4-mini-instruct", "source": "translations/microsoft__Phi-4-mini-instruct.jsonl" },
+    { "model": "LiquidAI/LFM2-1.2B", "source": "translations/LiquidAI__LFM2-1.2B.jsonl" },
+    { "model": "meta-llama/Llama-3.2-3B-Instruct", "source": "translations/meta-llama__Llama-3.2-3B-Instruct.jsonl" },
+    { "model": "Rakuten/RakutenAI-2.0-mini-instruct", "source": "translations/Rakuten__RakutenAI-2.0-mini-instruct.jsonl" },
+    { "model": "LiquidAI/LFM2-350M", "source": "translations/LiquidAI__LFM2-350M.jsonl" },
+    { "model": "SakanaAI/TinySwallow-1.5B", "source": "translations/SakanaAI__TinySwallow-1.5B.jsonl" },
+    { "model": "augmxnt/shisa-7b-v1", "source": "base_translations/augmxnt__shisa-7b-v1.jsonl" }
+  ]
+}

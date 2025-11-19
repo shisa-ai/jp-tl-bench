@@ -333,9 +333,17 @@ def main(test_model, judge_model):
     comparisons = []
     # Load base set comparisons
     safe_judge_name = judge_model.replace("/", "__")
-    base_file = f'base_sets/base_set.{safe_judge_name}.jsonl'
-    if not os.path.exists(base_file):
-        print(f"Base set file not found: {base_file}")
+    candidates = [
+        os.path.join("base_sets", f"base_set.{safe_judge_name}.jsonl"),
+        os.path.join("baseset", "v1.0", f"base_set.{safe_judge_name}.jsonl"),
+    ]
+    base_file = None
+    for path in candidates:
+        if os.path.exists(path):
+            base_file = path
+            break
+    if not base_file:
+        print(f"Base set file not found. Checked: {', '.join(candidates)}")
         exit(1)
     print(f"\nProcessing base set file: {base_file}...")
     comparisons = load_comparisons_from_file(base_file)

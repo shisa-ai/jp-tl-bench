@@ -1,0 +1,122 @@
+[
+  {
+    "model": "gemini-2.5-pro",
+    "safe_name": "gemini-2.5-pro",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "gemini-2.5-flash",
+    "safe_name": "gemini-2.5-flash",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "shisa-ai/shisa-v2-llama3.1-405b",
+    "safe_name": "shisa-ai__shisa-v2-llama3.1-405b",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+    "safe_name": "Qwen__Qwen3-30B-A3B-Instruct-2507",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "shisa-ai/shisa-v2-unphi4-14b",
+    "safe_name": "shisa-ai__shisa-v2-unphi4-14b",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "openai/gpt-4o",
+    "safe_name": "openai__gpt-4o",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "meta-llama/Llama-3.3-70B-Instruct",
+    "safe_name": "meta-llama__Llama-3.3-70B-Instruct",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "nvidia/NVIDIA-Nemotron-Nano-12B-v2",
+    "safe_name": "nvidia__NVIDIA-Nemotron-Nano-12B-v2",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5",
+    "safe_name": "tokyotech-llm__Llama-3.1-Swallow-8B-Instruct-v0.5",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "microsoft/phi-4",
+    "safe_name": "microsoft__phi-4",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "cyberagent/Mistral-Nemo-Japanese-Instruct-2408",
+    "safe_name": "cyberagent__Mistral-Nemo-Japanese-Instruct-2408",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "safe_name": "meta-llama__Llama-3.1-8B-Instruct",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "Qwen/Qwen3-4B",
+    "safe_name": "Qwen__Qwen3-4B",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "microsoft/Phi-4-mini-instruct",
+    "safe_name": "microsoft__Phi-4-mini-instruct",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "LiquidAI/LFM2-1.2B",
+    "safe_name": "LiquidAI__LFM2-1.2B",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "safe_name": "meta-llama__Llama-3.2-3B-Instruct",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "Rakuten/RakutenAI-2.0-mini-instruct",
+    "safe_name": "Rakuten__RakutenAI-2.0-mini-instruct",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "LiquidAI/LFM2-350M",
+    "safe_name": "LiquidAI__LFM2-350M",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "SakanaAI/TinySwallow-1.5B",
+    "safe_name": "SakanaAI__TinySwallow-1.5B",
+    "matches": 1273,
+    "unique_opponents": 19
+  },
+  {
+    "model": "augmxnt/shisa-7b-v1",
+    "safe_name": "augmxnt__shisa-7b-v1",
+    "matches": 1273,
+    "unique_opponents": 19
+  }
+]

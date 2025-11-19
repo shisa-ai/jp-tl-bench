@@ -80,11 +80,12 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 -   `MODEL_API_KEY_ENV`: The name of the environment variable holding the API key for your test model. Defaults to `OPENAI_API_KEY`.
 -   `JUDGE_API_KEY_ENV`: The name of the environment variable holding the API key for the judge model. Defaults to `GEMINI_API_KEY`.
 -   `LOW_CONTEXT` / `ULTRA_LOW_CONTEXT`: Set to `true` to use prompts with a smaller context window. Disabled by default.
+-   `BASESET_SNAPSHOT_DIR`: Snapshot directory containing frozen anchor translations and base-set artifacts used for comparisons. Defaults to `baseset/v1.0`.
 
 ## Workflow
 
 1.  **Translate**: The script prompts the target model to translate a predefined set of ~70 English and Japanese text samples.
-2.  **Generate Pairs**: The new translations are paired up with existing translations from the base models (`base_translations/`) to create comparison pairs.
+2.  **Generate Pairs**: The new translations are paired up with existing translations from the base models in the frozen snapshot (by default `baseset/v1.0`) to create comparison pairs. `run_translation_bench.sh` automatically syncs from the snapshot directory (`BASESET_SNAPSHOT_DIR`) so every run is evaluated against the same anchor set.
 3.  **Judge**: The judge model evaluates each pair and picks a winner. The analysis for each comparison is saved to the `analysis/` directory.
 4.  **Rank**: The script analyzes the win/loss data using a Bradley-Terry model to calculate scores and generate rankings. 
 
