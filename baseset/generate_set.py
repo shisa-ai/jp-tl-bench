@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from io import StringIO
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -212,10 +213,63 @@ def find_missing_answer_ids(analysis_file: Optional[Path]) -> List[str]:
                 data = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            analysis = data.get("analysis", "")
-            if not ANSWER_RE.search(analysis or ""):
+            analysis = data.get("analysis", "") or ""
+            match = ANSWER_RE.search(analysis)
+            if not match:
+                missing.append(data.get("id"))
+                continue
+            answer = "".join(c for c in match.group(1) if c.isalpha()).lower()
+            if answer not in {"a", "b"}:
                 missing.append(data.get("id"))
     return [m for m in missing if m]
+
+
+def collect_judged_ids(analysis_file: Optional[Path]) -> set:
+    """Collect IDs of all comparisons that have been judged (valid <answer>A/B</answer>)."""
+    if not analysis_file or not analysis_file.exists():
+        return set()
+    judged = set()
+    with analysis_file.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            analysis = data.get("analysis", "") or ""
+            match = ANSWER_RE.search(analysis)
+            if not match:
+                continue
+            answer = "".join(c for c in match.group(1) if c.isalpha()).lower()
+            if answer not in {"a", "b"}:
+                continue
+            item_id = data.get("id")
+            if item_id:
+                judged.add(item_id)
+    return judged
+
+
+def count_total_pairs(pair_file: Path) -> int:
+    """Count total number of pairs in the pair file."""
+    count = 0
+    with pair_file.open(encoding="utf-8") as handle:
+        for line in handle:
+            count += 1
+    return count
+
+
+def collect_pair_ids(pair_file: Path) -> set:
+    """Collect all pair IDs from the pair file to detect missing rows."""
+    ids = set()
+    with pair_file.open(encoding="utf-8") as handle:
+        for line in handle:
+            try:
+                data = json.loads(line)
+                pid = data.get("id")
+                if pid:
+                    ids.add(pid)
+            except json.JSONDecodeError:
+                continue
+    return ids
 
 
 def run_auto_judge(
@@ -226,6 +280,8 @@ def run_auto_judge(
     api_key_env: str,
     max_workers: int,
     concurrency_limit: int,
+    skip_ids: Optional[set] = None,
+    use_gemini: bool = False,
 ) -> Path:
     click.echo("\n[3b] Running translation comparer to fill missing judges")
     repo_pairs = REPO_ROOT / "base_conversation_pairs.jsonl"
@@ -234,6 +290,8 @@ def run_auto_judge(
         backup = repo_pairs.with_suffix(".setgen.bak")
         shutil.move(repo_pairs, backup)
     shutil.copy2(pair_file, repo_pairs)
+
+    skip_ids_file = None
     try:
         cmd = [
             sys.executable,
@@ -250,12 +308,24 @@ def run_auto_judge(
             "--api-key-env",
             api_key_env,
         ]
+        if use_gemini:
+            cmd.append("--gemini-judge")
+        if skip_ids:
+            # Write skip_ids to a temporary file to avoid "argument list too long" errors
+            skip_ids_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
+            for skip_id in sorted(skip_ids):
+                skip_ids_file.write(f"{skip_id}\n")
+            skip_ids_file.close()
+            cmd.extend(["--skip-ids-file", skip_ids_file.name])
+            click.echo(f"  - Writing {len(skip_ids):,} skip IDs to temp file: {skip_ids_file.name}")
         click.echo(f"  - Executing: {' '.join(cmd)}")
         subprocess.run(cmd, cwd=REPO_ROOT, check=True)
     finally:
         repo_pairs.unlink(missing_ok=True)
         if backup:
             shutil.move(backup, repo_pairs)
+        if skip_ids_file and os.path.exists(skip_ids_file.name):
+            os.unlink(skip_ids_file.name)
 
     safe_judge = safe_name(judge_model)
     base_file = REPO_ROOT / "base_sets" / f"base_set.{safe_judge}.jsonl"
@@ -418,6 +488,18 @@ def analyze_wins(
     show_default=True,
     help="Maximum times to run the judge when trying to fill missing data (including retries for missing answers).",
 )
+@click.option(
+    "--rerun/--no-rerun",
+    default=False,
+    show_default=True,
+    help="Force re-run all judgments even if they already exist (expensive!).",
+)
+@click.option(
+    "--gemini-judge/--no-gemini-judge",
+    default=False,
+    show_default=True,
+    help="Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.",
+)
 def main(
     snapshot_dir: str,
     manifest: str,
@@ -430,6 +512,8 @@ def main(
     concurrency_limit: int,
     auto_judge: bool,
     max_judge_attempts: int,
+    rerun: bool,
+    gemini_judge: bool,
 ) -> None:
     click.echo("=== Generic base-set generator ===")
 
@@ -460,27 +544,49 @@ def main(
     summarize_pairs(pair_file, report_dir, manifest_models)
 
     analysis_path = resolve_analysis_file(analysis_file, snapshot_path, judge_model)
+
+    # Collect statistics about what's been judged
+    pair_ids = collect_pair_ids(pair_file)
+    total_pairs = len(pair_ids)
+    judged_ids = set() if rerun else collect_judged_ids(analysis_path)
+    missing_answers_ids = find_missing_answer_ids(analysis_path)
+    missing_rows = pair_ids - (judged_ids | set(missing_answers_ids))
+
     present_models = collect_present_models(analysis_path)
     missing = sorted([safe for safe in manifest_models if safe not in present_models])
 
-    missing_answers = find_missing_answer_ids(analysis_path)
+    # Show statistics
+    click.echo("\n[Stats] Judging progress:")
+    click.echo(f"  - Total pairs: {total_pairs:,}")
+    if rerun:
+        click.echo(f"  - Already judged: 0 (--rerun flag set, will re-run all)")
+        click.echo(f"  - Need to judge: {total_pairs:,}")
+    else:
+        click.echo(f"  - Already judged: {len(judged_ids):,} ({len(judged_ids)/total_pairs*100:.1f}%)")
+        click.echo(f"  - Missing answers: {len(missing_answers_ids):,}")
+        if missing_rows:
+            click.echo(f"  - Missing rows (not present in base_set): {len(missing_rows):,}")
+        need_to_judge = total_pairs - len(judged_ids)
+        click.echo(f"  - Need to judge: {need_to_judge:,} ({need_to_judge/total_pairs*100:.1f}%)")
 
     if missing:
         click.echo("\nThe following models have no judged comparisons yet:")
         for safe in missing:
             click.echo(f"  - {manifest_models[safe]}")
-    if missing_answers:
-        click.echo(f"\nFound {len(missing_answers)} comparisons without <answer> tags in {analysis_path}")
 
     attempts = 0
-    while auto_judge and (missing or missing_answers) and attempts < max_judge_attempts:
+    skip_ids = None if rerun else judged_ids
+    while auto_judge and (missing or missing_answers_ids or missing_rows or rerun or (total_pairs - len(judged_ids)) > 0) and attempts < max_judge_attempts:
         if not judge_base_url:
             raise click.ClickException(
                 "Need --judge-base-url (or JUDGE_URL env) to auto-run the judge for missing models."
             )
         attempts += 1
         if attempts == 1:
-            click.echo("\nSince --no-auto-judge was not supplied, running translation comparisons now...")
+            if rerun:
+                click.echo("\nRunning translation comparisons with --rerun (will re-judge all pairs)...")
+            else:
+                click.echo("\nSince --no-auto-judge was not supplied, running translation comparisons now...")
         else:
             click.echo(f"\nRetrying judge run to backfill missing data (attempt {attempts}/{max_judge_attempts})...")
         analysis_path = run_auto_judge(
@@ -491,24 +597,34 @@ def main(
             judge_api_key_env,
             max_workers,
             concurrency_limit,
+            skip_ids,
+            gemini_judge,
         )
         present_models = collect_present_models(analysis_path)
         missing = sorted([safe for safe in manifest_models if safe not in present_models])
-        missing_answers = find_missing_answer_ids(analysis_path)
+        missing_answers_ids = find_missing_answer_ids(analysis_path)
+        judged_ids = collect_judged_ids(analysis_path)
+        missing_rows = pair_ids - (judged_ids | set(missing_answers_ids))
+
+        # Update skip_ids for next attempt (don't skip successfully judged items)
+        skip_ids = judged_ids
+
         if missing:
             click.echo("Still missing models after judge run:")
             for safe in missing:
                 click.echo(f"  - {manifest_models[safe]}")
-        if missing_answers:
-            click.echo(f"Still {len(missing_answers)} comparisons without <answer>; will retry if attempts remain.")
+        if missing_answers_ids:
+            click.echo(f"Still {len(missing_answers_ids)} comparisons without <answer>; will retry if attempts remain.")
+        if missing_rows:
+            click.echo(f"Still {len(missing_rows)} comparisons missing entirely; will retry if attempts remain.")
 
-    if (missing or missing_answers) and not auto_judge:
+    if (missing or missing_answers_ids or missing_rows) and not auto_judge:
         click.echo(
             "\nSome data are missing. Re-run with --auto-judge "
             "or execute translation_comparer_any_model.py manually.",
             err=True,
         )
-    elif (missing or missing_answers) and auto_judge and attempts >= max_judge_attempts:
+    elif (missing or missing_answers_ids or missing_rows) and auto_judge and attempts >= max_judge_attempts:
         click.echo(
             f"\nReached max judge attempts ({max_judge_attempts}) but still have missing data."
             " You may re-run later or inspect API failures.",
@@ -524,4 +640,3 @@ def main(
 
 if __name__ == "__main__":
     main()
-

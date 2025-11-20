@@ -16,7 +16,7 @@
     { "model": "meta-llama/Llama-3.1-8B-Instruct", "source": "translations/meta-llama__Llama-3.1-8B-Instruct.jsonl" },
     { "model": "Qwen/Qwen3-4B", "source": "base_translations/Qwen__Qwen3-4B.jsonl" },
     { "model": "microsoft/Phi-4-mini-instruct", "source": "translations/microsoft__Phi-4-mini-instruct.jsonl" },
-    { "model": "LiquidAI/LFM2-1.2B", "source": "translations/LiquidAI__LFM2-1.2B.jsonl" },
+    { "model": "LiquidAI/LFM2-2.6B", "source": "translations/LiquidAI__LFM2-2.6B.jsonl" },
     { "model": "meta-llama/Llama-3.2-3B-Instruct", "source": "translations/meta-llama__Llama-3.2-3B-Instruct.jsonl" },
     { "model": "Rakuten/RakutenAI-2.0-mini-instruct", "source": "translations/Rakuten__RakutenAI-2.0-mini-instruct.jsonl" },
     { "model": "LiquidAI/LFM2-350M", "source": "translations/LiquidAI__LFM2-350M.jsonl" },

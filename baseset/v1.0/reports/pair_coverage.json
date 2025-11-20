@@ -84,8 +84,8 @@
     "unique_opponents": 19
   },
   {
-    "model": "LiquidAI/LFM2-1.2B",
-    "safe_name": "LiquidAI__LFM2-1.2B",
+    "model": "LiquidAI/LFM2-2.6B",
+    "safe_name": "LiquidAI__LFM2-2.6B",
     "matches": 1273,
     "unique_opponents": 19
   },
