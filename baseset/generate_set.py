@@ -167,11 +167,19 @@ def summarize_pairs(pair_file: Path, report_dir: Path, manifest_models: Dict[str
 def resolve_analysis_file(explicit: str, snapshot_dir: Path, judge_model: str) -> Optional[Path]:
     if explicit:
         candidate = Path(explicit)
-        if not candidate.is_absolute():
-            base_candidate = snapshot_dir / candidate
-            repo_candidate = REPO_ROOT / candidate
-            candidate = base_candidate if base_candidate.exists() else repo_candidate
-        return candidate.resolve()
+        if candidate.is_absolute():
+            return candidate
+
+        # Try a few plausible roots for relative paths:
+        # - relative to snapshot dir (common when passing "base_set...jsonl")
+        # - relative to snapshot parent (e.g., running from baseset/ and passing "v1.0/...")
+        # - relative to repo root
+        for root in (snapshot_dir, snapshot_dir.parent, REPO_ROOT):
+            candidate_path = (root / candidate).resolve()
+            if candidate_path.exists():
+                return candidate_path
+        # If none matched, fall through and return None to signal "not found"
+        return None
 
     safe_judge = safe_name(judge_model)
     preferred = [
@@ -544,6 +552,11 @@ def main(
     summarize_pairs(pair_file, report_dir, manifest_models)
 
     analysis_path = resolve_analysis_file(analysis_file, snapshot_path, judge_model)
+    explicit_analysis = bool(analysis_file)
+    if explicit_analysis and (not analysis_path or not analysis_path.exists()) and not auto_judge:
+        raise click.ClickException(
+            f"Analysis file not found: {analysis_file}. Tried relative to {snapshot_path}, its parent, and repo root."
+        )
 
     # Collect statistics about what's been judged
     pair_ids = collect_pair_ids(pair_file)
