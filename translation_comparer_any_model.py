@@ -4,6 +4,7 @@ import os
 import json
 import random
 import time
+from pathlib import Path
 from datasets import Dataset
 from openai import OpenAI
 import click
@@ -14,24 +15,55 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Try to import google.genai for native Gemini support
+try:
+    import google.genai as genai
+    from google.genai import types as genai_types
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
 
 class TranslationComparer:
     """Compares two translations and analyzes their differences."""
 
-    def __init__(self, model_name: str, base_url: str, api_key: str, concurrency_limit: int):
+    def __init__(self, model_name: str, base_url: str, api_key: str, concurrency_limit: int, prompt_path: Path, use_gemini: bool = False):
         self.model_name = model_name
-        self.client = OpenAI(
-            base_url=base_url,
-            api_key=api_key,
-        )
+        self.use_gemini = use_gemini
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.failed_items = []
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
+        self.prompt_path = prompt_path
+
+        if use_gemini:
+            if not GEMINI_AVAILABLE:
+                raise ImportError("google-genai is required for native Gemini support. Install with: pip install google-genai")
+            self.client = genai.Client(api_key=api_key)
+            # Set up safety settings to bypass safety filters
+            self.safety_settings = [
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"
+                ),
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"
+                ),
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"
+                ),
+                genai_types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT", threshold="OFF"
+                ),
+            ]
+        else:
+            self.client = OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+            )
 
     def prompt(self, input_data: dict) -> str:
         """Generate a prompt for comparison using the template from prompts/compare_prompt.txt and the translation data."""
-        with open("prompts/compare_prompt.txt", "r", encoding="utf-8") as f:
+        with self.prompt_path.open("r", encoding="utf-8") as f:
             prompt_template = f.read()
         return prompt_template.replace("{{formatted_data}}", input_data["formatted_data"])
 
@@ -59,24 +91,107 @@ class TranslationComparer:
             "llm_b_generation_config": input_data.get("llm_b_generation_config"),
         }
 
-    def compare_item(self, item: dict) -> dict:
-        """Compares a single item with retry logic and concurrency control."""
+    def compare_item_gemini(self, item: dict) -> dict:
+        """Compares a single item using native Gemini API with retry logic and concurrency control."""
         # Add jitter to spread out requests
         time.sleep(random.uniform(0.1, 0.5))
 
         with self.semaphore:
             prompt_text = self.prompt(item)
-            
+
             max_retries = 5
             base_delay = 1
-            
+
             for attempt in range(max_retries + 1):
                 try:
+                    # Set up thinking config for Gemini 2.5 models
+                    # thinking_budget is in tokens: 0 = disabled (flash), 128 = low (pro), 512 = medium, higher = more thinking
+                    thinking_config = None
+                    thinking_budget = 0
+                    if 'gemini-2.5-pro' in self.model_name:
+                        thinking_budget = 128
+                        thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+                    elif 'gemini-2.5' in self.model_name:
+                        # Flash or other 2.5 models - disable thinking
+                        thinking_budget = 0
+                        thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+
+                    # Set up generation config
+                    gen_config = genai_types.GenerateContentConfig(
+                        temperature=0.0,
+                        safety_settings=self.safety_settings,
+                        thinking_config=thinking_config,
+                    )
+
+                    # Create judge generation config for saving
+                    judge_generation_config = {
+                        "temperature": 0.0,
+                        "model": self.model_name,
+                    }
+                    if thinking_config:
+                        judge_generation_config['thinking_budget'] = thinking_budget
+
+                    # Generate content
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=prompt_text,
+                        config=gen_config,
+                    )
+
+                    if not response.text:
+                        raise ValueError("Empty response from API")
+
+                    # Track token usage
+                    if hasattr(response, 'usage_metadata'):
+                        self.total_input_tokens += getattr(response.usage_metadata, 'prompt_token_count', 0)
+                        self.total_output_tokens += getattr(response.usage_metadata, 'candidates_token_count', 0)
+
+                    parsed_result = self.parse(item, response.text, judge_generation_config, self.model_name)
+                    return parsed_result
+
+                except Exception as e:
+                    error_msg = f"API error: {type(e).__name__}: {str(e)}"
+                    if attempt == max_retries:
+                        # Track failed item
+                        failed_item = {
+                            "id": item.get("id", "unknown"),
+                            "name": item.get("name", "unknown"),
+                            "error": error_msg,
+                            "attempts": max_retries + 1
+                        }
+                        self.failed_items.append(failed_item)
+                        print(f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}")
+                        return None  # Return None for failed items
+                    delay = base_delay * (2 ** attempt)
+                    print(f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s...")
+                    time.sleep(delay)
+
+    def compare_item(self, item: dict) -> dict:
+        """Compares a single item with retry logic and concurrency control."""
+        if self.use_gemini:
+            return self.compare_item_gemini(item)
+
+        # Add jitter to spread out requests
+        time.sleep(random.uniform(0.1, 0.5))
+
+        with self.semaphore:
+            prompt_text = self.prompt(item)
+
+            max_retries = 5
+            base_delay = 1
+
+            for attempt in range(max_retries + 1):
+                try:
+                    temp = 0
+                    lower_name = self.model_name.lower()
+                    if "gpt-5" in lower_name:
+                        temp = None  # gpt-5 disallows explicit temperature; use model default
                     call_params = {
                         "messages": [{"role": "user", "content": prompt_text}],
                         "model": self.model_name,
-                        "temperature": 0,
                     }
+                    if temp is not None:
+                        call_params["temperature"] = temp
 
                     if 'gemini-2.5' in self.model_name:
                         call_params['reasoning_effort'] = 'low'
@@ -98,7 +213,7 @@ class TranslationComparer:
 
                     parsed_result = self.parse(item, response, judge_generation_config, self.model_name)
                     return parsed_result
-                    
+
                 except Exception as e:
                     error_msg = f"API error: {type(e).__name__}: {str(e)}"
                     if attempt == max_retries:
@@ -129,9 +244,9 @@ class TranslationComparer:
 @click.option(
     '--base-url',
     '-u',
-    default=os.getenv("JUDGE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"),
+    default=os.getenv("JUDGE_URL", "https://api.openai.com/v1"),
     show_default=True,
-    help='Base URL for the judge API endpoint (mirrors run_translation_bench.sh defaults).',
+    help='Base URL for the judge API endpoint (ignored if --gemini-judge is set).',
 )
 @click.option(
     '--judge-model',
@@ -146,17 +261,31 @@ class TranslationComparer:
 @click.option('--concurrency-limit', default=40, help='Max number of concurrent API requests.')
 @click.option(
     '--api-key-env',
-    default=os.getenv("JUDGE_API_KEY_ENV", "GEMINI_API_KEY"),
+    default=os.getenv("JUDGE_API_KEY_ENV", "OPENAI_API_KEY"),
     show_default=True,
-    help='Env var name that holds the judge API key (mirrors run_translation_bench.sh defaults).',
+    help='Env var name that holds the judge API key. Use GEMINI_API_KEY when --gemini-judge.',
 )
-def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env):
+@click.option(
+    '--pairs-file',
+    type=click.Path(),
+    help='Optional path to translation pairs JSONL. Overrides default base_conversation_pairs.jsonl/latest_conversation_pairs.jsonl.',
+)
+@click.option('--skip-ids', help='Comma-separated list of IDs to skip (already processed). Deprecated - use --skip-ids-file instead.')
+@click.option('--skip-ids-file', type=click.Path(exists=True), help='Path to file containing IDs to skip (one per line)')
+@click.option(
+    '--gemini-judge/--no-gemini-judge',
+    default=False,
+    show_default=True,
+    help='Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.',
+)
+def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge):
     """Compare translations between different models using a third LLM as analyzer.
 
     Reads the translation pairs from the JSONL file, creates a dataset,
     and uses an LLM to analyze the differences. Saves the analysis results
     to a new JSONL file.
     """
+    script_dir = Path(__file__).resolve().parent
 
     if not test_model and not generate_base_set:
         raise click.UsageError(
@@ -168,23 +297,29 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         )
 
     # Validate that prompt file exists
-    if not os.path.exists("prompts/compare_prompt.txt"):
+    prompt_path = script_dir / "prompts" / "compare_prompt.txt"
+    if not prompt_path.exists():
         raise SystemExit("Error: Missing prompts/compare_prompt.txt. See README for setup.")
 
     # Create output directory if it doesn't exist
-    os.makedirs("scores", exist_ok=True)
+    (script_dir / "scores").mkdir(exist_ok=True)
 
     # Read translation pairs
-    input_file = (
-        "base_conversation_pairs.jsonl"
-        if generate_base_set
-        else "latest_conversation_pairs.jsonl"
-    )
-    if not os.path.exists(input_file):
+    if pairs_file:
+        input_file = Path(pairs_file)
+        if not input_file.is_absolute():
+            input_file = (Path.cwd() / input_file).resolve()
+    else:
+        input_file = script_dir / (
+            "base_conversation_pairs.jsonl"
+            if generate_base_set
+            else "latest_conversation_pairs.jsonl"
+        )
+    if not input_file.exists():
         raise SystemExit(f"Error: Input file not found: {input_file}. Please run generate_shootout_data.py first.")
 
     translation_pairs = []
-    with open(input_file, "r", encoding="utf-8") as f:
+    with input_file.open("r", encoding="utf-8") as f:
         for line in f:
             translation_pairs.append(json.loads(line))
 
@@ -216,14 +351,47 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
                     lines[i] = line.replace("## Translation B", "## Translation A")
             pair["formatted_data"] = '\n'.join(lines)
 
+    # Filter out pairs with IDs in skip_ids or skip_ids_file
+    skip_id_set = set()
+    if skip_ids_file:
+        with open(skip_ids_file, 'r') as f:
+            skip_id_set = {line.strip() for line in f if line.strip()}
+        print(f"Loaded {len(skip_id_set):,} skip IDs from {skip_ids_file}")
+    elif skip_ids:
+        skip_id_set = set(skip_ids.split(','))
+        print(f"Loaded {len(skip_id_set):,} skip IDs from command line")
+
+    if skip_id_set:
+        original_count = len(translation_pairs)
+        translation_pairs = [p for p in translation_pairs if p.get('id') not in skip_id_set]
+        filtered_count = original_count - len(translation_pairs)
+        if filtered_count > 0:
+            print(f"Skipping {filtered_count:,} already-processed items (out of {original_count:,} total)")
+
     # Create dataset and shuffle it
     translations = Dataset.from_list(translation_pairs)
     translations = translations.shuffle(seed=42)  # Set seed for reproducibility
 
     api_key = os.getenv(api_key_env)
+    if not api_key:
+        raise SystemExit(f"Error: Missing API key. Set {api_key_env} in your environment.")
+
+    if gemini_judge:
+        print(f"Using native Gemini API for judging with model: {judge_model}")
+        if not GEMINI_AVAILABLE:
+            raise click.UsageError(
+                "google-genai is required for --gemini-judge. Install with: pip install google-genai"
+            )
+    else:
+        print(f"Using OpenAI-compatible API at {base_url} with model: {judge_model}")
 
     comparer = TranslationComparer(
-        model_name=judge_model, base_url=base_url, api_key=api_key, concurrency_limit=concurrency_limit
+        model_name=judge_model,
+        base_url=base_url,
+        api_key=api_key,
+        concurrency_limit=concurrency_limit,
+        prompt_path=prompt_path,
+        use_gemini=gemini_judge,
     )
 
     results = comparer(translations, max_workers=max_workers)
@@ -231,21 +399,61 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
     # Save analysis results
     if generate_base_set:
         safe_judge_model = judge_model.replace("/", "__")
-        output_path = os.path.join(
-            "base_sets", f"base_set.{safe_judge_model}.jsonl"
-        )
+        output_dir = script_dir / "base_sets"
+        output_path = output_dir / f"base_set.{safe_judge_model}.jsonl"
     else:
         safe_test_model = test_model.replace("/", "__")
         safe_judge_model = judge_model.replace("/", "__")
-        output_path = os.path.join(
-            "scores", f"{safe_test_model}.{safe_judge_model}.jsonl"
-        )
+        output_dir = script_dir / "scores"
+        output_path = output_dir / f"{safe_test_model}.{safe_judge_model}.jsonl"
+
+    # Create output directory if it doesn't exist
+    output_dir.mkdir(exist_ok=True)
 
     # Filter out None results from failed items
     successful_results = [item for item in results if item is not None]
-    
+
+    # If we're appending to existing results (skip_ids was used), merge with existing file
+    existing_by_id = {}
+    existing_order = []
+    if (skip_ids or skip_ids_file) and output_path.exists():
+        print(f"Merging {len(successful_results):,} new results with existing file: {output_path}")
+        with output_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                item_id = item.get("id")
+                if not item_id:
+                    continue
+                if item_id not in existing_by_id:
+                    existing_order.append(item_id)
+                existing_by_id[item_id] = item
+        print(f"  - Existing unique results: {len(existing_by_id):,}")
+        print(f"  - New results: {len(successful_results):,}")
+
+    # Combine existing and new results, preferring new judgments when IDs overlap
+    merged = dict(existing_by_id)
+    for item in successful_results:
+        item_id = item.get("id")
+        if not item_id:
+            continue
+        if item_id not in existing_by_id:
+            existing_order.append(item_id)
+        merged[item_id] = item
+
+    if merged:
+        # Preserve existing order, then append any new IDs not previously seen
+        ordered_ids = existing_order + [i for i in merged.keys() if i not in existing_order]
+        all_results = [merged[i] for i in ordered_ids]
+    else:
+        all_results = successful_results
+
+    print(f"  - Total merged results: {len(all_results):,}")
+
     with open(output_path, "w", encoding="utf-8") as f:
-        for item in successful_results:
+        for item in all_results:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     # Print summary
