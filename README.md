@@ -150,6 +150,52 @@ python generate_translation_data.py --base-url https://generativelanguage.google
 
 This will generate translation data using Google's Gemini model and save the results to `translations/<model_name>.jsonl`.
 
+### Viewing Results with the TUI
+
+After running benchmarks, you can interactively browse results using the Text User Interface (TUI) viewer. The viewer uses lazy loading for fast performance even with large datasets and supports two viewing modes.
+
+**Usage:**
+
+```bash
+python view_tl_bench_tui.py [OPTIONS]
+```
+
+**Options:**
+- `--scores-dir`: Path to scores directory (default: `./scores`)
+- `--baseset-dir`: Path to baseset directory (default: `./baseset`)
+- `--translations-dir`: Path to translations directory (default: `./translations`)
+
+**Example:**
+
+```bash
+python view_tl_bench_tui.py
+```
+
+**Viewing Modes:**
+1. **Comparisons Mode** - View pairwise comparisons (A vs B) with judge analysis
+   - Source text and both translations side-by-side
+   - Winner highlighted with judge reasoning
+   - Filter by wins/losses
+2. **Translations Mode** - View individual model translation outputs
+   - Source text → Translation for each prompt
+   - Generation settings (temperature, etc.)
+   - Browse all 70 translation prompts per model
+
+**Features:**
+- **View Mode Selector**: Switch between Comparisons and Translations views
+- **Category Selector**: Switch between Test Models, Base Set v1.0, and Base Set v0.9
+- **Fast Lazy Loading**: Loads metadata instantly (~0.3s), full details on-demand
+- **Model Browser**: Browse all models with LT/EN scores and win rates
+- **Navigation**: Step through items one at a time with n/p keys
+
+**Keyboard Shortcuts:**
+  - `q`: Quit
+  - `v`: Toggle between Comparisons/Translations view
+  - `n`/`p`: Next/Previous item
+  - `w`: Toggle wins-only filter (Comparisons mode)
+  - `l`: Toggle losses-only filter (Comparisons mode)
+  - Arrow keys/Tab: Navigate between sections
+
 ### Cleaning Analysis Files
 
 Over time, analysis files may accumulate invalid entries (e.g., malformed JSON, incorrect answer formats). You can clean these files using the `utils/clean_analysis_file.py` script. This script will read an analysis file, remove any invalid lines, and overwrite the original file with the cleaned version.
