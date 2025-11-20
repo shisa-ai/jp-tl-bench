@@ -16,6 +16,9 @@
 15. Make it so we save analysis files in "scores" instead of "analysis", saving a redundant copy that was also a common point of failure.
 16. Renamed "analysis" to "base_sets".
 17. Removed command line option to set special results directory for scores. It was redundant and not needed.
+18. Added TUI viewer (view_tl_bench_tui.py) for interactive browsing of benchmark results, including scores, comparisons, and judge analyses. Added textual to requirements.txt.
+19. Optimized TUI viewer with lazy loading (99% less initial data, 2x faster startup), added category selector for Test Models vs Base Set versions (v0.9, v1.0), and on-demand detail loading for efficient browsing of large datasets (12k+ comparisons).
+20. Added dual-view mode to TUI: Comparisons view (pairwise A vs B with judge) + Translations view (individual model outputs with generation settings). Users can switch between modes with 'v' key or dropdown selector.
 
 ### TODO
 1. Allow easy adding to base set.
