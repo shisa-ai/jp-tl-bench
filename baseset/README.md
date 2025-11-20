@@ -18,6 +18,8 @@ The `v1.0/` directory freezes the translation outputs for the 20 baseline models
 3. Print/snapshot coverage of matches per model.
 4. Locate (or generate) a judged `base_set.<judge>.jsonl` and display the LT table.
 
+The helper also: (a) treats invalid/missing `<answer>` tags as gaps to backfill, (b) reuses existing judgments via skip-IDs when auto-judging so nothing is re-evaluated, and (c) filters scoring to manifest models only (extraneous judgments in the file are ignored).
+
 Key options:
 
 - `--judge-base-url` / `JUDGE_URL` – default matches `run_translation_bench.sh` (`https://generativelanguage.googleapis.com/v1beta/openai/`). Needed when `--auto-judge` (default) calls `translation_comparer_any_model.py --generate-base-set` for missing comparisons. The script temporarily installs `v1.0/base_conversation_pairs.v1.0.jsonl` as `base_conversation_pairs.jsonl`, runs the comparer, then copies the resulting `base_sets/base_set.<judge>.jsonl` into `v1.0/` for archival.
@@ -47,26 +49,26 @@ The manifest lists the following 20 anchors (shown here so you can quickly verif
 
 | # | Model | Source | WR% | LT |
 | --- | --- | --- | --- | --- |
-| 1 | gemini-2.5-pro | `base_translations/gemini-2.5-pro.jsonl` | 96.07 | 9.96 |
-| 2 | gemini-2.5-flash | `base_translations/gemini-2.5-flash.jsonl` | 93.00 | 9.92 |
-| 3 | shisa-ai/shisa-v2-llama3.1-405b | `translations/shisa-ai__shisa-v2-llama3.1-405b.jsonl` | 81.56 | 9.62 |
-| 4 | Qwen/Qwen3-30B-A3B-Instruct-2507 | `translations/Qwen__Qwen3-30B-A3B-Instruct-2507.jsonl` | 84.04 | 9.71 |
-| 5 | shisa-ai/shisa-v2-unphi4-14b | `translations/shisa-ai__shisa-v2-unphi4-14b.jsonl` | 74.21 | 9.20 |
-| 6 | openai/gpt-4o | `base_translations/openai__gpt-4o.jsonl` | 76.16 | 9.33 |
-| 7 | meta-llama/Llama-3.3-70B-Instruct | `base_translations/meta-llama__Llama-3.3-70B-Instruct.jsonl` | 59.40 | 7.42 |
-| 8 | nvidia/NVIDIA-Nemotron-Nano-12B-v2 | `translations/nvidia__NVIDIA-Nemotron-Nano-12B-v2.jsonl` | 60.66 | 7.63 |
-| 9 | tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5 | `base_translations/tokyotech-llm__Llama-3.1-Swallow-8B-Instruct-v0.5.jsonl` | 62.88 | 7.97 |
-| 10 | microsoft/phi-4 | `base_translations/microsoft__phi-4.jsonl` | 52.29 | 6.07 |
-| 11 | cyberagent/Mistral-Nemo-Japanese-Instruct-2408 | `base_translations/cyberagent__Mistral-Nemo-Japanese-Instruct-2408.jsonl` | 49.10 | 5.37 |
-| 12 | meta-llama/Llama-3.1-8B-Instruct | `translations/meta-llama__Llama-3.1-8B-Instruct.jsonl` | 40.80 | 3.52 |
-| 13 | Qwen/Qwen3-4B | `base_translations/Qwen__Qwen3-4B.jsonl` | 45.64 | 4.59 |
-| 14 | microsoft/Phi-4-mini-instruct | `translations/microsoft__Phi-4-mini-instruct.jsonl` | 28.38 | 1.35 |
-| 15 | LiquidAI/LFM2-1.2B | `translations/LiquidAI__LFM2-1.2B.jsonl` | 28.11 | 1.32 |
-| 16 | meta-llama/Llama-3.2-3B-Instruct | `translations/meta-llama__Llama-3.2-3B-Instruct.jsonl` | 25.16 | 0.98 |
-| 17 | Rakuten/RakutenAI-2.0-mini-instruct | `translations/Rakuten__RakutenAI-2.0-mini-instruct.jsonl` | 20.87 | 0.62 |
-| 18 | LiquidAI/LFM2-350M | `translations/LiquidAI__LFM2-350M.jsonl` | 14.09 | 0.24 |
-| 19 | SakanaAI/TinySwallow-1.5B | `translations/SakanaAI__TinySwallow-1.5B.jsonl` | 6.54 | 0.04 |
-| 20 | augmxnt/shisa-7b-v1 | `base_translations/augmxnt__shisa-7b-v1.jsonl` | 0.71 | 0.00 |
+| 1 | gemini-2.5-pro | `base_translations/gemini-2.5-pro.jsonl` | 96.15 | 9.94 |
+| 2 | gemini-2.5-flash | `base_translations/gemini-2.5-flash.jsonl` | 92.92 | 9.89 |
+| 3 | Qwen/Qwen3-30B-A3B-Instruct-2507 | `translations/Qwen__Qwen3-30B-A3B-Instruct-2507.jsonl` | 84.33 | 9.63 |
+| 4 | shisa-ai/shisa-v2-llama3.1-405b | `translations/shisa-ai__shisa-v2-llama3.1-405b.jsonl` | 81.45 | 9.49 |
+| 5 | openai/gpt-4o | `base_translations/openai__gpt-4o.jsonl` | 76.02 | 9.12 |
+| 6 | shisa-ai/shisa-v2-unphi4-14b | `translations/shisa-ai__shisa-v2-unphi4-14b.jsonl` | 72.81 | 8.83 |
+| 7 | tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5 | `base_translations/tokyotech-llm__Llama-3.1-Swallow-8B-Instruct-v0.5.jsonl` | 62.16 | 7.45 |
+| 8 | nvidia/NVIDIA-Nemotron-Nano-12B-v2 | `translations/nvidia__NVIDIA-Nemotron-Nano-12B-v2.jsonl` | 59.91 | 7.07 |
+| 9 | meta-llama/Llama-3.3-70B-Instruct | `base_translations/meta-llama__Llama-3.3-70B-Instruct.jsonl` | 58.05 | 6.74 |
+| 10 | microsoft/phi-4 | `base_translations/microsoft__phi-4.jsonl` | 49.80 | 5.13 |
+| 11 | cyberagent/Mistral-Nemo-Japanese-Instruct-2408 | `base_translations/cyberagent__Mistral-Nemo-Japanese-Instruct-2408.jsonl` | 47.52 | 4.69 |
+| 12 | Qwen/Qwen3-4B | `base_translations/Qwen__Qwen3-4B.jsonl` | 44.68 | 4.11 |
+| 13 | LiquidAI/LFM2-2.6B | `translations/LiquidAI__LFM2-2.6B.jsonl` | 43.83 | 3.92 |
+| 14 | meta-llama/Llama-3.1-8B-Instruct | `translations/meta-llama__Llama-3.1-8B-Instruct.jsonl` | 38.84 | 2.95 |
+| 15 | microsoft/Phi-4-mini-instruct | `translations/microsoft__Phi-4-mini-instruct.jsonl` | 24.94 | 0.98 |
+| 16 | augmxnt/shisa-7b-v1 | `base_translations/augmxnt__shisa-7b-v1.jsonl` | 21.36 | 0.68 |
+| 17 | meta-llama/Llama-3.2-3B-Instruct | `translations/meta-llama__Llama-3.2-3B-Instruct.jsonl` | 19.18 | 0.54 |
+| 18 | Rakuten/RakutenAI-2.0-mini-instruct | `translations/Rakuten__RakutenAI-2.0-mini-instruct.jsonl` | 14.20 | 0.29 |
+| 19 | LiquidAI/LFM2-350M | `translations/LiquidAI__LFM2-350M.jsonl` | 8.75 | 0.13 |
+| 20 | SakanaAI/TinySwallow-1.5B | `translations/SakanaAI__TinySwallow-1.5B.jsonl` | 2.52 | 0.03 |
 
 These files plus the pairwise judgments produced by your judge (stored either in `base_sets/` or `baseset/v1.0/`) are sufficient to recreate LT/EN scores via `prepare_v1_0.py` (which reuses `choix_analyzer.py` under the hood).
 
