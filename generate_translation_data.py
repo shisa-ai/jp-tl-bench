@@ -26,7 +26,16 @@ class ModelConfig:
 class Translator:
     """Translates text using a specified model."""
 
-    def __init__(self, model_name: str, base_url: str, api_key: str, low_context: bool = False, ultra_low_context: bool = False, concurrency_limit: int = 5):
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        low_context: bool = False,
+        ultra_low_context: bool = False,
+        concurrency_limit: int = 5,
+        max_tokens: int = 8192,
+    ):
         self.model_name = model_name
         self.low_context = low_context
         self.ultra_low_context = ultra_low_context
@@ -38,6 +47,7 @@ class Translator:
         self.total_output_tokens = 0
         self.failed_items = []
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
+        self.max_tokens = max_tokens
 
     def get_model_config(self) -> ModelConfig:
         """Get model-specific configuration based on model name."""
@@ -164,6 +174,8 @@ class Translator:
                         params["frequency_penalty"] = model_config.frequency_penalty
                     if model_config.reasoning_effort is not None:
                         params["reasoning_effort"] = model_config.reasoning_effort
+                    if self.max_tokens is not None:
+                        params["max_tokens"] = self.max_tokens
 
                     # Create generation config for saving
                     generation_config = params.copy()
@@ -214,7 +226,8 @@ class Translator:
 @click.option('--max-workers', default=5, help='Number of worker threads for translation.')
 @click.option('--concurrency-limit', default=5, help='Max number of concurrent API requests.')
 @click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
-def main(base_url, test_model, low_context, ultra_low_context, max_workers, concurrency_limit, api_key_env):
+@click.option('--max-tokens', default=8192, show_default=True, help='Maximum completion tokens per translation.')
+def main(base_url, test_model, low_context, ultra_low_context, max_workers, concurrency_limit, api_key_env, max_tokens):
     """Translate text using the specified model.
 
     Loads the translation test set from shisa-ai/bt_translation_test,
@@ -231,7 +244,8 @@ def main(base_url, test_model, low_context, ultra_low_context, max_workers, conc
         api_key=api_key,
         low_context=low_context,
         ultra_low_context=ultra_low_context,
-        concurrency_limit=concurrency_limit
+        concurrency_limit=concurrency_limit,
+        max_tokens=max_tokens,
     )
 
     results = translator(dataset, max_workers=max_workers)
