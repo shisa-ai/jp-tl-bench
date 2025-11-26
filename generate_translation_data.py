@@ -150,21 +150,21 @@ class Translator:
 
         with self.semaphore:
             prompt_text = self.get_prompt(item)
-            
+
             max_retries = 5
             base_delay = 1
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     # Get model-specific configuration
                     model_config = self.get_model_config()
-                    
+
                     # Build parameters based on model config
                     params = {
                         "messages": [{"role": "user", "content": prompt_text}],
                         "model": self.model_name,
                     }
-                    
+
                     # Add parameters only if they are not None
                     if model_config.temperature is not None:
                         params["temperature"] = model_config.temperature
@@ -194,7 +194,7 @@ class Translator:
 
                     parsed_result = self.parse(item, response, prompt_text, generation_config)
                     return parsed_result
-                    
+
                 except Exception as e:
                     error_msg = f"API error: {type(e).__name__}: {str(e)}"
                     if attempt == max_retries:
@@ -202,13 +202,42 @@ class Translator:
                         failed_item = {
                             "name": item.get("name", "unknown"),
                             "error": error_msg,
-                            "attempts": max_retries + 1
+                            "attempts": max_retries + 1,
                         }
                         self.failed_items.append(failed_item)
-                        print(f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}")
-                        return None  # Return None for failed items
+                        print(
+                            f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}"
+                        )
+                        # Return a placeholder result so downstream scripts
+                        # always see the full set of items.
+                        placeholder_translation = f"[TRANSLATION FAILED: {error_msg}]"
+                        return {
+                            "name": item.get("name", "unknown"),
+                            "source_text": item.get("text", ""),
+                            "difficulty": item.get("difficulty"),
+                            "english": item.get("english", True),
+                            "full_response": "",
+                            "translation": placeholder_translation,
+                            "prompt": prompt_text,
+                            "temperature": None,
+                            "top_p": None,
+                            "frequency_penalty": None,
+                            "reasoning_effort": None,
+                            "low_context": self.low_context,
+                            "ultra_low_context": self.ultra_low_context,
+                            "generation_config": {
+                                "error": error_msg,
+                                "temperature": None,
+                                "top_p": None,
+                                "frequency_penalty": None,
+                                "reasoning_effort": None,
+                                "max_tokens": self.max_tokens,
+                            },
+                        }
                     delay = base_delay * (2 ** attempt)
-                    print(f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s...")
+                    print(
+                        f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s..."
+                    )
                     time.sleep(delay)
 
     def __call__(self, dataset: Dataset, max_workers: int) -> list:
@@ -253,11 +282,8 @@ def main(base_url, test_model, low_context, ultra_low_context, max_workers, conc
     safe_model_name = test_model.replace("/", "__")
     output_path = os.path.join("translations", f"{safe_model_name}.jsonl")
     
-    # Filter out None results from failed items
-    successful_results = [item for item in results if item is not None]
-    
     with open(output_path, "w", encoding="utf-8") as f:
-        for item in successful_results:
+        for item in results:
             try:
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
             except json.JSONDecodeError as e:
@@ -267,7 +293,7 @@ def main(base_url, test_model, low_context, ultra_low_context, max_workers, conc
     # Print summary
     print(f"\nProcessing Summary:")
     print(f"Total items: {len(results)}")
-    print(f"Successful: {len(successful_results)}")
+    print(f"Successful: {len(results) - len(translator.failed_items)}")
     print(f"Failed: {len(translator.failed_items)}")
     
     if translator.failed_items:
