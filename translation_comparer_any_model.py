@@ -278,7 +278,8 @@ class TranslationComparer:
     show_default=True,
     help='Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.',
 )
-def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge):
+@click.option('--rejudge', is_flag=True, help='Ignore existing judgments and redo all pairs.')
+def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
     """Compare translations between different models using a third LLM as analyzer.
 
     Reads the translation pairs from the JSONL file, creates a dataset,
@@ -301,8 +302,8 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
     if not prompt_path.exists():
         raise SystemExit("Error: Missing prompts/compare_prompt.txt. See README for setup.")
 
-    # Create output directory if it doesn't exist
-    (script_dir / "scores").mkdir(exist_ok=True)
+    snapshot_dir = Path(os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0"))
+    base_version = snapshot_dir.name
 
     # Read translation pairs
     if pairs_file:
@@ -310,11 +311,12 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         if not input_file.is_absolute():
             input_file = (Path.cwd() / input_file).resolve()
     else:
-        input_file = script_dir / (
-            "base_conversation_pairs.jsonl"
-            if generate_base_set
-            else "latest_conversation_pairs.jsonl"
-        )
+        if generate_base_set:
+            input_file = script_dir / "base_conversation_pairs.jsonl"
+        else:
+            safe_test_model = test_model.replace("/", "__")
+            safe_judge = judge_model.replace("/", "__")
+            input_file = script_dir / "results" / base_version / safe_test_model / safe_judge / "pairs.jsonl"
     if not input_file.exists():
         raise SystemExit(f"Error: Input file not found: {input_file}. Please run generate_shootout_data.py first.")
 
@@ -368,8 +370,47 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         if filtered_count > 0:
             print(f"Skipping {filtered_count:,} already-processed items (out of {original_count:,} total)")
 
+    # Default output path (per model/judge)
+    if generate_base_set:
+        safe_judge_model = judge_model.replace("/", "__")
+        output_dir = script_dir / snapshot_dir
+        output_path = output_dir / f"base_set.{safe_judge_model}.jsonl"
+    else:
+        safe_test_model = test_model.replace("/", "__")
+        safe_judge_model = judge_model.replace("/", "__")
+        output_dir = script_dir / "results" / base_version / safe_test_model / safe_judge_model
+        output_path = output_dir / "judgments.jsonl"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load existing judgments if reusing
+    existing_by_id = {}
+    existing_order = []
+    if output_path.exists() and not rejudge:
+        with output_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                pid = item.get("id")
+                if not pid:
+                    continue
+                if pid not in existing_by_id:
+                    existing_order.append(pid)
+                existing_by_id[pid] = item
+        if existing_by_id:
+            print(f"Reusing {len(existing_by_id):,} existing judgments from {output_path}")
+
+    # Determine pending pairs (not yet judged or forced rejudge)
+    pending_pairs = []
+    for pair in translation_pairs:
+        pid = pair.get("id")
+        if not rejudge and pid in existing_by_id:
+            continue
+        pending_pairs.append(pair)
+
     # Create dataset and shuffle it
-    translations = Dataset.from_list(translation_pairs)
+    translations = Dataset.from_list(pending_pairs)
     translations = translations.shuffle(seed=42)  # Set seed for reproducibility
 
     api_key = os.getenv(api_key_env)
@@ -396,40 +437,11 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
 
     results = comparer(translations, max_workers=max_workers)
 
-    # Save analysis results
-    if generate_base_set:
-        safe_judge_model = judge_model.replace("/", "__")
-        output_dir = script_dir / "base_sets"
-        output_path = output_dir / f"base_set.{safe_judge_model}.jsonl"
-    else:
-        safe_test_model = test_model.replace("/", "__")
-        safe_judge_model = judge_model.replace("/", "__")
-        output_dir = script_dir / "scores"
-        output_path = output_dir / f"{safe_test_model}.{safe_judge_model}.jsonl"
-
-    # Create output directory if it doesn't exist
-    output_dir.mkdir(exist_ok=True)
-
     # Filter out None results from failed items
     successful_results = [item for item in results if item is not None]
 
-    # If we're appending to existing results (skip_ids was used), merge with existing file
-    existing_by_id = {}
-    existing_order = []
-    if (skip_ids or skip_ids_file) and output_path.exists():
+    if existing_by_id:
         print(f"Merging {len(successful_results):,} new results with existing file: {output_path}")
-        with output_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                item_id = item.get("id")
-                if not item_id:
-                    continue
-                if item_id not in existing_by_id:
-                    existing_order.append(item_id)
-                existing_by_id[item_id] = item
         print(f"  - Existing unique results: {len(existing_by_id):,}")
         print(f"  - New results: {len(successful_results):,}")
 
@@ -456,11 +468,16 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         for item in all_results:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
+    expected_count = len(set(p.get("id") for p in translation_pairs))
+    judged_count = len(all_results)
+
     # Print summary
     print(f"\nProcessing Summary:")
-    print(f"Total items: {len(results)}")
-    print(f"Successful: {len(successful_results)}")
-    print(f"Failed: {len(comparer.failed_items)}")
+    print(f"Pairs after skips: {expected_count}")
+    print(f"Newly attempted: {len(results)}")
+    print(f"Successful new: {len(successful_results)}")
+    print(f"Failed new: {len(comparer.failed_items)}")
+    print(f"Total judged entries now: {judged_count}")
     
     if comparer.failed_items:
         print(f"\nFailed items:")

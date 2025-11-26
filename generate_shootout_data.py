@@ -7,6 +7,14 @@ import click
 
 BASESET_SNAPSHOT_DIR = os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")
 
+
+def default_pairs_path(test_model: str, judge_model: str = None) -> str:
+    """Compute per-model pairs path under results/<baseset_version>/<model>/<judge>/pairs.jsonl."""
+    safe_model = test_model.replace("/", "__")
+    safe_judge = (judge_model or "default").replace("/", "__")
+    base_version = os.path.basename(os.path.normpath(BASESET_SNAPSHOT_DIR))
+    return os.path.join("results", base_version, safe_model, safe_judge, "pairs.jsonl")
+
 def load_jsonl(file_path):
     data = []
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -44,11 +52,18 @@ def write_pair_settings(file_a, file_b, example_name):
         "llm_b": os.path.splitext(file_b)[0]
     }
 
-def generate_translation_pairs(test_model_file=None, force=False):
+def generate_translation_pairs(test_model_file=None, force=False, output_path=None, judge_model=None):
     """Generate translation pairs comparing target file against all other models."""
     base_translations_dir = os.path.join(BASESET_SNAPSHOT_DIR, "translations")
     translations_dir = "translations"
-    output_file = "latest_conversation_pairs.jsonl" if test_model_file else "base_conversation_pairs.jsonl"
+    if output_path:
+        output_file = output_path
+    elif test_model_file:
+        # Default per-model location, parallel-safe
+        pretty_name = os.path.splitext(test_model_file)[0].replace("__", "/")
+        output_file = default_pairs_path(pretty_name, judge_model)
+    else:
+        output_file = "base_conversation_pairs.jsonl"
     
     # Add warning and confirmation for base_conversation_pairs.jsonl
     if not test_model_file and not force:
@@ -88,6 +103,9 @@ def generate_translation_pairs(test_model_file=None, force=False):
         if file_b not in file_lengths:
             file_lengths[file_b] = len(load_jsonl(file_b_path))
     
+    out_dir = os.path.dirname(output_file)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(output_file, 'w', encoding='utf-8') as out_f:
         for file_a, file_b in pairs:
             if test_model_file:
@@ -164,17 +182,19 @@ def generate_translation_pairs(test_model_file=None, force=False):
 @click.option('--test-model', help='Test model to generate pairs for. If not specified, pairs will be generated between all models.')
 @click.option('--generate-base', is_flag=True, help='Generate base translation pairs. This will overwrite base_conversation_pairs.jsonl')
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompts for automation/CI')
-def main(test_model, generate_base, yes):
+@click.option('--output', help='Optional output path for pairs file (default per-model results path when --test-model).')
+@click.option('--judge-model', help='Optional judge name for embedding in default results path.')
+def main(test_model, generate_base, yes, output, judge_model):
     """Generate conversation pairs for evaluation."""
     if generate_base:
         # build all pairs in base_translations
-        generate_translation_pairs(force=yes)
+        generate_translation_pairs(force=yes, output_path=output)
     else:
         if not test_model:
             raise click.UsageError("Either --test-model or --generate-base must be specified")
         # Transform the model name into the target file path
         test_model_file = test_model.replace('/', '__') + '.jsonl'
-        generate_translation_pairs(test_model_file, force=yes)
+        generate_translation_pairs(test_model_file, force=yes, output_path=output, judge_model=judge_model)
 
 if __name__ == "__main__":
     main()

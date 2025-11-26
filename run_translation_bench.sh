@@ -13,6 +13,8 @@ JUDGE_MODEL="${JUDGE_MODEL:-gemini-2.5-flash}"  # Default judge model
 MODEL_API_KEY_ENV="${MODEL_API_KEY_ENV:-OPENAI_API_KEY}" # Default env var for test model API key
 JUDGE_API_KEY_ENV="${JUDGE_API_KEY_ENV:-GEMINI_API_KEY}" # Default env var for judge model API key
 BASESET_SNAPSHOT_DIR="${BASESET_SNAPSHOT_DIR:-baseset/v1.0}"  # Default anchor snapshot used for comparisons
+# Optional override for completion tokens; forwarded to generate_translation_data.py --max-tokens when set.
+MAX_TOKENS="${MAX_TOKENS:-}"
 
 # Validate required arguments
 if [ -z "$MODEL" ] || [ -z "$OPENAI_URL" ]; then
@@ -46,18 +48,25 @@ $CONDA_COMMAND activate shisa-jp-tl-bench
 # Change to working directory
 log "Starting eval script"
 
-if [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
-    python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV --ultra-low-context
-elif [ "$LOW_CONTEXT" = "true" ]; then
-    python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV --low-context
-else
-    python generate_translation_data.py --base-url $OPENAI_URL --test-model $MODEL --api-key-env $MODEL_API_KEY_ENV
+# Build arguments for translation generation
+GEN_ARGS=(--base-url "$OPENAI_URL" --test-model "$MODEL" --api-key-env "$MODEL_API_KEY_ENV")
+
+if [ -n "$MAX_TOKENS" ]; then
+    GEN_ARGS+=(--max-tokens "$MAX_TOKENS")
 fi
 
+if [ "$ULTRA_LOW_CONTEXT" = "true" ]; then
+    GEN_ARGS+=(--ultra-low-context)
+elif [ "$LOW_CONTEXT" = "true" ]; then
+    GEN_ARGS+=(--low-context)
+fi
+
+python generate_translation_data.py "${GEN_ARGS[@]}"
+
 log "Successfully generated conversation data. Generating shootout data..."
-python generate_shootout_data.py --test-model "$MODEL"
+python generate_shootout_data.py --test-model "$MODEL" --judge-model "$JUDGE_MODEL"
 log "Successfully generated shootout data. Evaluating results..."
 python translation_comparer_any_model.py --base-url "$JUDGE_URL" --judge-model "$JUDGE_MODEL" --test-model "$MODEL" --api-key-env "$JUDGE_API_KEY_ENV"
 log "Successfully evaluated results. Running Bradley-Terry comparision..."
 python choix_analyzer.py --test-model "$MODEL" --judge-model "$JUDGE_MODEL"
-log "All done! Scores saved to scores/scores.jsonl"
+log "All done! Scores saved under results/$(basename ${BASESET_SNAPSHOT_DIR:-baseset/v1.0})/${MODEL//\//__}/${JUDGE_MODEL//\//__}/"

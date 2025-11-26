@@ -73,25 +73,10 @@ def list_models(judge):
 
 def find_base_set_file(judge):
     """Helper function to find the correct base set file for a judge."""
-    # First, check for the direct match
-    direct_match = f"base_sets/base_set.{judge}.jsonl"
+    snapshot_dir = os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")
+    direct_match = os.path.join(snapshot_dir, f"base_set.{judge}.jsonl")
     if os.path.exists(direct_match):
         return direct_match
-
-    # Next, check the frozen v1.0 snapshot in baseset/v1.0
-    snapshot_match = os.path.join("baseset", "v1.0", f"base_set.{judge}.jsonl")
-    if os.path.exists(snapshot_match):
-        return snapshot_match
-
-    # If not found, search for files ending with the judge's name
-    try:
-        files = os.listdir('base_sets')
-        for f in files:
-            if f.endswith(f".{judge}.jsonl"):
-                return os.path.join('base_sets', f)
-    except FileNotFoundError:
-        return None # base_sets directory doesn't exist
-
     return None
 
 def safe_to_display_name(safe_name):
