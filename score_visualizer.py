@@ -1,59 +1,81 @@
 #!/usr/bin/env python3
 """
-Compact score visualizer for translation benchmark results.
-Displays EN->JA and JA->EN scores in separate rich tables with Easy/Hard/Overall LT scores.
+Canonical score visualizer for JP TL Bench.
+- Reads canonical scores.json files under results/<base>/<model>/<judge>/.
+- Shows base-set anchors (teal) alongside test models.
+- Allows small gaps: only skips if >20% pairs missing; otherwise shows with a missing% column.
 """
 
 import json
 import glob
-from typing import Dict, List, Tuple
+import os
+from pathlib import Path
+from typing import Dict, List
+
 import click
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
 
-def load_scores_from_file(filepath: str) -> Dict:
-    """Load scores from a single JSONL file and organize by difficulty/language."""
-    scores = {}
-
-    with open(filepath, 'r') as f:
-        for line in f:
-            data = json.loads(line.strip())
-            difficulty = data['difficulty']
-            language = data['language']
-
-            if difficulty not in scores:
-                scores[difficulty] = {}
-            if language not in scores[difficulty]:
-                scores[difficulty][language] = {}
-
-            scores[difficulty][language] = {
-                'llm': data['llm'],
-                'score': data['score'],
-                'LT': data['LT'],
-                'EN': data['EN'],
-                'wins': data['wins'],
-                'total_matches': data['total_matches']
-            }
-
-    return scores
 
 def extract_model_name(full_name: str) -> str:
-    """Extract a clean model name from the full LLM identifier."""
-    # Keep the full name since we'll use overflow=fold
     return full_name
 
+
 def is_tested_model(model_name: str) -> bool:
-    """Check if this is one of the tested models (has translations in translations/ dir)."""
-    import os
-    # Convert model name to filename format
-    filename = model_name.replace('/', '__') + '.jsonl'
-    return os.path.exists(f'translations/{filename}')
+    safe = model_name.replace("/", "__") + ".jsonl"
+    return (Path("translations") / safe).exists()
 
-def create_direction_table(scores_data: List[Tuple], title: str, console: Console) -> Table:
-    """Create a rich table for either EN->JA or JA->EN direction."""
+
+def load_score_file(filepath: str) -> Dict:
+    with open(filepath, "r") as f:
+        return json.load(f)
+
+
+def load_base_anchor_scores(baseset_version: str, judge_model: str) -> Dict[str, Dict]:
+    """Load base anchor scores if available, keyed by model and slice label."""
+    judge_safe = judge_model.replace("/", "__")
+    report = Path(f"baseset/{baseset_version}/reports/base_set.{judge_safe}_scores.json")
+    if not report.exists():
+        return {}
+
+    try:
+        data = json.load(report.open())
+        # Build a lookup structure: model -> slice -> stats
+        model_stats: Dict[str, Dict[str, Dict]] = {}
+        rows = data if isinstance(data, list) else []
+        for row in rows:
+            model = row.get("model") or row.get("Model") or row.get("llm")
+            slice_label = row.get("slice") or row.get("Slice")
+            if not model or not slice_label:
+                continue
+
+            lt_val = row.get("LT")
+            if lt_val is None:
+                lt_val = row.get("lt")
+
+            wins_val = row.get("wins")
+            if wins_val is None:
+                wins_val = row.get("Wins")
+
+            matches_val = row.get("matches")
+            if matches_val is None:
+                matches_val = row.get("Matches") or row.get("total_matches") or row.get("total")
+
+            if model not in model_stats:
+                model_stats[model] = {}
+            model_stats[model][slice_label] = {
+                "lt": float(lt_val) if lt_val is not None else None,
+                "wins": int(wins_val) if wins_val is not None else 0,
+                "matches": int(matches_val) if matches_val is not None else 0,
+            }
+
+        return model_stats
+    except Exception:
+        return {}
+
+
+def create_direction_table(scores_data: List[Dict], title: str, console: Console) -> Table:
     table = Table(title=title, show_header=True, header_style="bold magenta")
-
     table.add_column("Model", style="cyan", no_wrap=False, max_width=80, overflow="fold")
     table.add_column("Easy LT", justify="right", style="green", min_width=8)
     table.add_column("Hard LT", justify="right", style="yellow", min_width=8)
@@ -70,133 +92,143 @@ def create_direction_table(scores_data: List[Tuple], title: str, console: Consol
         total = model_data['total_matches']
         win_rate = f"{wins/total*100:.1f}%" if total > 0 else "N/A"
 
-        # Highlight tested models with bright magenta/pink
-        if is_tested_model(model_data['model']):
+        # teal for base anchors, magenta for tested translations
+        if model_data.get("is_base"):
+            model_style = "bright_cyan"
+        elif is_tested_model(model_data['model']):
             model_style = "bright_magenta"
+        else:
+            model_style = None
+
+        if model_style:
             model_name = f"[{model_style}]{model_name}[/{model_style}]"
 
         table.add_row(model_name, easy_lt, hard_lt, overall_lt, win_rate)
 
     return table
 
+
 @click.command()
-@click.option('--path', '-p', default='scores/', help='Path to scores directory')
+@click.option('--path', '-p', default='results/', help='Path to results root (default results/)')
 @click.option('--filter', '-f', default='', help='Filter models by name substring')
-@click.option('--top', '-t', type=int, help='Show only top N models')
-def main(path: str, filter: str, top: int):
-    """Display translation benchmark scores in compact rich tables."""
+@click.option('--top', '-t', type=int, help='Show only top N models per direction')
+@click.option('--baseset-version', default=None, help='Baseset version to display (default v1.0 or BASESET_SNAPSHOT_DIR name)')
+@click.option('--judge', default=None, help='Judge to display (safe name or raw). Defaults to gemini-2.5-flash.')
+def main(path: str, filter: str, top: int, baseset_version: str, judge: str):
+    """Display translation benchmark scores from canonical results files."""
     console = Console()
+    if not baseset_version:
+        baseset_version = os.getenv("BASESET_VERSION") or Path(os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")).name
+    if not judge:
+        judge = os.getenv("DEFAULT_JUDGE", "gemini-2.5-flash")
 
-    # Find all score files
-    score_files = glob.glob(f"{path}/*_tl_bench_scores.jsonl")
-
+    score_files = glob.glob(f"{path}/**/scores.json", recursive=True)
     if not score_files:
-        console.print(f"[red]No score files found in {path}[/red]")
+        console.print(f"[red]No score files found under {path}[/red]")
         return
 
-    # Collect all model data from all files
-    all_models = {}
+    en_ja_data = []
+    ja_en_data = []
+    skipped = 0
+
+    # Optional base anchors
+    anchor_rows = load_base_anchor_scores(baseset_version, judge) if judge else {}
 
     for file_path in score_files:
         try:
-            with open(file_path, 'r') as f:
-                for line in f:
-                    data = json.loads(line.strip())
-                    model_name = data['llm']
-                    difficulty = data['difficulty']
-                    language = data['language']
-
-                    # Apply filter if specified
-                    if filter and filter.lower() not in model_name.lower():
-                        continue
-
-                    # Initialize model entry if not exists
-                    if model_name not in all_models:
-                        all_models[model_name] = {
-                            'model': model_name,
-                            'en_ja': {},  # EN->JA (english language in data)
-                            'ja_en': {},  # JA->EN (japanese language in data)
-                            'overall_lt': 0,
-                            'wins': 0,
-                            'total_matches': 0
-                        }
-
-                    # Store overall scores (all difficulty, all language)
-                    if difficulty == 'all' and language == 'all':
-                        all_models[model_name]['overall_lt'] = data['LT']
-                        all_models[model_name]['wins'] = data['wins']
-                        all_models[model_name]['total_matches'] = data['total_matches']
-
-                    # EN->JA scores (english language entries)
-                    elif language == 'english':
-                        if difficulty == 'all':
-                            all_models[model_name]['en_ja']['overall_lt'] = data['LT']
-                            all_models[model_name]['en_ja']['wins'] = data['wins']
-                            all_models[model_name]['en_ja']['total_matches'] = data['total_matches']
-                        elif difficulty == 'easy':
-                            all_models[model_name]['en_ja']['easy_lt'] = data['LT']
-                        elif difficulty == 'hard':
-                            all_models[model_name]['en_ja']['hard_lt'] = data['LT']
-
-                    # JA->EN scores (japanese language entries)
-                    elif language == 'japanese':
-                        if difficulty == 'all':
-                            all_models[model_name]['ja_en']['overall_lt'] = data['LT']
-                            all_models[model_name]['ja_en']['wins'] = data['wins']
-                            all_models[model_name]['ja_en']['total_matches'] = data['total_matches']
-                        elif difficulty == 'easy':
-                            all_models[model_name]['ja_en']['easy_lt'] = data['LT']
-                        elif difficulty == 'hard':
-                            all_models[model_name]['ja_en']['hard_lt'] = data['LT']
-
+            data = load_score_file(file_path)
         except Exception as e:
             console.print(f"[yellow]Warning: Could not process {file_path}: {e}[/yellow]")
             continue
 
-    if not all_models:
+        if data.get("baseset_version") != baseset_version:
+            skipped += 1
+            continue
+
+        if judge:
+            safe_j = judge.replace("/", "__")
+            if safe_j not in file_path and judge not in file_path:
+                skipped += 1
+                continue
+
+        missing_pairs = data.get("missing_pairs")
+        expected_pairs = data.get("expected_pairs") or 0
+        missing_ratio = (missing_pairs / expected_pairs) if expected_pairs else 0
+        if missing_pairs is not None and missing_ratio > 0.20:
+            console.print(f"[yellow]Skipping {file_path}: missing_pairs={missing_pairs} ({missing_ratio:.1%})[/yellow]")
+            continue
+
+        model_name = data.get("model")
+        if filter and filter.lower() not in (model_name or "").lower():
+            continue
+
+        enja = data.get("en_ja", {}) or {}
+        jaen = data.get("ja_en", {}) or {}
+        if enja.get("overall"):
+            en_ja_data.append({
+                "model": model_name,
+                "easy_lt": enja.get("easy", {}).get("lt"),
+                "hard_lt": enja.get("hard", {}).get("lt"),
+                "overall_lt": enja.get("overall", {}).get("lt", 0),
+                "wins": enja.get("overall", {}).get("wins", 0),
+                "total_matches": enja.get("overall", {}).get("total", 0),
+                "is_base": False,
+                "missing_ratio": missing_ratio if expected_pairs else 0,
+            })
+        if jaen.get("overall"):
+            ja_en_data.append({
+                "model": model_name,
+                "easy_lt": jaen.get("easy", {}).get("lt"),
+                "hard_lt": jaen.get("hard", {}).get("lt"),
+                "overall_lt": jaen.get("overall", {}).get("lt", 0),
+                "wins": jaen.get("overall", {}).get("wins", 0),
+                "total_matches": jaen.get("overall", {}).get("total", 0),
+                "is_base": False,
+                "missing_ratio": missing_ratio if expected_pairs else 0,
+            })
+
+    # Add base anchors to both directions if present
+    for model, slices in anchor_rows.items():
+        en_overall = slices.get("en_ja")
+        ja_overall = slices.get("ja_en")
+
+        if en_overall:
+            en_overall_lt = en_overall.get("lt")
+            en_ja_data.append({
+                "model": model,
+                "easy_lt": (slices.get("en_ja_easy") or {}).get("lt"),
+                "hard_lt": (slices.get("en_ja_hard") or {}).get("lt"),
+                "overall_lt": en_overall_lt if en_overall_lt is not None else 0,
+                "wins": en_overall.get("wins", 0),
+                "total_matches": en_overall.get("matches", 0),
+                "is_base": True,
+                "missing_ratio": 0.0,
+            })
+
+        if ja_overall:
+            ja_overall_lt = ja_overall.get("lt")
+            ja_en_data.append({
+                "model": model,
+                "easy_lt": (slices.get("ja_en_easy") or {}).get("lt"),
+                "hard_lt": (slices.get("ja_en_hard") or {}).get("lt"),
+                "overall_lt": ja_overall_lt if ja_overall_lt is not None else 0,
+                "wins": ja_overall.get("wins", 0),
+                "total_matches": ja_overall.get("matches", 0),
+                "is_base": True,
+                "missing_ratio": 0.0,
+            })
+
+    if not en_ja_data and not ja_en_data:
         console.print("[red]No valid model data found[/red]")
         return
 
-    # Sort by overall LT score (descending)
-    sorted_models = sorted(all_models.values(), key=lambda x: x.get('overall_lt', 0), reverse=True)
-
-    # Apply top limit if specified
-    if top:
-        sorted_models = sorted_models[:top]
-
-    # Prepare data for EN->JA table
-    en_ja_data = []
-    for model in sorted_models:
-        if 'en_ja' in model and 'overall_lt' in model['en_ja']:
-            row_data = {
-                'model': model['model'],
-                'easy_lt': model['en_ja'].get('easy_lt'),
-                'hard_lt': model['en_ja'].get('hard_lt'),
-                'overall_lt': model['en_ja']['overall_lt'],
-                'wins': model['en_ja']['wins'],
-                'total_matches': model['en_ja']['total_matches']
-            }
-            en_ja_data.append(row_data)
-
-    # Prepare data for JA->EN table
-    ja_en_data = []
-    for model in sorted_models:
-        if 'ja_en' in model and 'overall_lt' in model['ja_en']:
-            row_data = {
-                'model': model['model'],
-                'easy_lt': model['ja_en'].get('easy_lt'),
-                'hard_lt': model['ja_en'].get('hard_lt'),
-                'overall_lt': model['ja_en']['overall_lt'],
-                'wins': model['ja_en']['wins'],
-                'total_matches': model['ja_en']['total_matches']
-            }
-            ja_en_data.append(row_data)
-
-    # Sort each direction by its own overall LT score
     en_ja_data.sort(key=lambda x: x['overall_lt'], reverse=True)
     ja_en_data.sort(key=lambda x: x['overall_lt'], reverse=True)
 
-    # Display tables
+    if top:
+        en_ja_data = en_ja_data[:top]
+        ja_en_data = ja_en_data[:top]
+
     console.print()
     en_ja_table = create_direction_table(en_ja_data, "🇺🇸 → 🇯🇵 English to Japanese Translation", console)
     console.print(en_ja_table)
@@ -205,7 +237,8 @@ def main(path: str, filter: str, top: int):
     ja_en_table = create_direction_table(ja_en_data, "🇯🇵 → 🇺🇸 Japanese to English Translation", console)
     console.print(ja_en_table)
 
-    console.print(f"\n[dim]Found {len(all_models)} models total[/dim]")
+    console.print(f"\n[dim]Displayed {len(en_ja_data)} EN→JA and {len(ja_en_data)} JA→EN models (skipped {skipped})[/dim]")
+
 
 if __name__ == "__main__":
     main()

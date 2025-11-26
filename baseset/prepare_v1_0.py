@@ -352,17 +352,41 @@ def analyze_wins(analysis_file: Path, manifest_models: Dict[str, str], missing_m
     ranker.fit(filtered)
     click.echo("\n[4/4] Bradley–Terry scores")
     slice_rows = []
+
+    # Overall across all difficulties and languages
     overall_rows = build_rows(ranker, manifest_models, "all", None)
     print_table(overall_rows, "Overall (all directions)")
     slice_rows.extend({"slice": "overall", **row} for row in overall_rows)
 
+    # EN→JA overall, easy, hard
     en_rows = build_rows(ranker, manifest_models, "all", "english")
     print_table(en_rows, "EN→JA (judge saw english inputs)")
-    slice_rows.extend({ "slice": "en_ja", **row} for row in en_rows)
+    slice_rows.extend({"slice": "en_ja", **row} for row in en_rows)
 
+    en_easy_rows = build_rows(ranker, manifest_models, "easy", "english")
+    if en_easy_rows:
+        print_table(en_easy_rows, "EN→JA Easy")
+        slice_rows.extend({"slice": "en_ja_easy", **row} for row in en_easy_rows)
+
+    en_hard_rows = build_rows(ranker, manifest_models, "hard", "english")
+    if en_hard_rows:
+        print_table(en_hard_rows, "EN→JA Hard")
+        slice_rows.extend({"slice": "en_ja_hard", **row} for row in en_hard_rows)
+
+    # JA→EN overall, easy, hard
     ja_rows = build_rows(ranker, manifest_models, "all", "japanese")
     print_table(ja_rows, "JA→EN (judge saw japanese inputs)")
     slice_rows.extend({"slice": "ja_en", **row} for row in ja_rows)
+
+    ja_easy_rows = build_rows(ranker, manifest_models, "easy", "japanese")
+    if ja_easy_rows:
+        print_table(ja_easy_rows, "JA→EN Easy")
+        slice_rows.extend({"slice": "ja_en_easy", **row} for row in ja_easy_rows)
+
+    ja_hard_rows = build_rows(ranker, manifest_models, "hard", "japanese")
+    if ja_hard_rows:
+        print_table(ja_hard_rows, "JA→EN Hard")
+        slice_rows.extend({"slice": "ja_en_hard", **row} for row in ja_hard_rows)
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     scores_path = REPORT_DIR / f"{analysis_file.stem}_scores.json"

@@ -7,6 +7,8 @@ import glob
 import json
 import re
 import os
+from datetime import datetime
+from pathlib import Path
  
 try:
     from rich.console import Console
@@ -218,6 +220,7 @@ class LLMRanker:
 
 def load_comparisons_from_file(file_path):
     """Helper function to load comparisons from a file."""
+    file_path = str(file_path)
     comparisons = []
     # Check if this is a base set file
     is_base_file = 'base_set.' in file_path
@@ -328,118 +331,114 @@ def display_rankings(console, rankings_df, title, target_model=None):
 @click.command()
 @click.option('--test-model', '-m', required=True, help='Name of the model being evaluated')
 @click.option('--judge-model', '-j', required=True, help='Name of the model that did the judging')
-def main(test_model, judge_model):
-    # Always load base set comparisons first
-    comparisons = []
-    # Load base set comparisons
+@click.option('--judgments-file', help='Optional path to judged comparisons (default results/<baseset_version>/<model>/<judge>/judgments.jsonl).')
+@click.option('--pairs-file', help='Optional path to pairs file for coverage accounting.')
+@click.option('--baseset-version', help='Baseset version label (default derived from BASESET_SNAPSHOT_DIR).')
+def main(test_model, judge_model, judgments_file, pairs_file, baseset_version):
     safe_judge_name = judge_model.replace("/", "__")
-    candidates = [
-        os.path.join("base_sets", f"base_set.{safe_judge_name}.jsonl"),
-        os.path.join("baseset", "v1.0", f"base_set.{safe_judge_name}.jsonl"),
-    ]
-    base_file = None
-    for path in candidates:
-        if os.path.exists(path):
-            base_file = path
-            break
-    if not base_file:
-        print(f"Base set file not found. Checked: {', '.join(candidates)}")
+    safe_model_name = test_model.replace("/", "__")
+    base_version = baseset_version or Path(os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")).name
+    default_results_dir = Path("results") / base_version / safe_model_name / safe_judge_name
+    if not judgments_file:
+        judgments_file = default_results_dir / "judgments.jsonl"
+    else:
+        judgments_file = Path(judgments_file)
+    if not pairs_file:
+        pairs_file = default_results_dir / "pairs.jsonl"
+    else:
+        pairs_file = Path(pairs_file)
+
+    # Always load base set comparisons first
+    snapshot_base_file = Path(os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")) / f"base_set.{safe_judge_name}.jsonl"
+    if not snapshot_base_file.exists():
+        print(f"Base set file not found at {snapshot_base_file}. Set BASESET_SNAPSHOT_DIR or ensure the file exists.")
         exit(1)
+    base_file = snapshot_base_file
     print(f"\nProcessing base set file: {base_file}...")
     comparisons = load_comparisons_from_file(base_file)
+    base_comparisons_count = len(comparisons)
 
-    # Load target model comparisons
-    safe_model_name = test_model.replace("/", "__")
-    target_file = f'scores/{safe_model_name}.{safe_judge_name}.jsonl'
-    if not os.path.exists(target_file):
-        print(f"Target model analysis file not found: {target_file}")
+    if not os.path.exists(judgments_file):
+        print(f"Target model judgments file not found: {judgments_file}")
         exit(1)
-    print(f"\nProcessing test model file: {target_file}...")
-    comparisons.extend(load_comparisons_from_file(target_file))
-    
+    print(f"\nProcessing test model file: {judgments_file}...")
+    target_comparisons = load_comparisons_from_file(judgments_file)
+    comparisons.extend(target_comparisons)
+    judged_pairs = len(target_comparisons)
+
+    expected_pairs = None
+    if pairs_file and pairs_file.exists():
+        expected_pairs = sum(1 for _ in pairs_file.open("r", encoding="utf-8"))
+    missing_pairs = None
+    if expected_pairs is not None:
+        missing_pairs = max(expected_pairs - judged_pairs, 0)
+
     if not comparisons:
         print("No valid comparisons found in any files")
         exit(1)
-            
-    # Initialize and fit the model
+
+    # Fit the model
     ranker = LLMRanker()
     ranker.fit(comparisons)
-    
-    console = Console() if RICH_AVAILABLE else None
 
-    # First print overall rankings
-    if RICH_AVAILABLE and console:
-        console.print("\n=== Overall Rankings ===", style="bold underline")
-    else:
-        print("\n=== Overall Rankings ===")
-    for diff in ['all', 'easy', 'hard']:
+    def extract_slice(diff: str, language: str):
         try:
-            rankings = ranker.get_rankings(diff)
-            rankings['llm'] = rankings['llm'].str.replace('__', '/')
-            display_rankings(console, rankings, f"Rankings for {diff} questions", test_model)
-        except ValueError as e:
-            if RICH_AVAILABLE and console:
-                console.print(f"\nNo data available for {diff} difficulty", style="red")
-            else:
-                print(f"\nNo data available for {diff} difficulty")
-            continue
+            rankings = ranker.get_rankings(diff, language)
+        except ValueError:
+            return None
+        rankings['llm'] = rankings['llm'].str.replace('__', '/')
+        row = rankings[rankings['llm'] == test_model]
+        if row.empty:
+            return None
+        row = row.iloc[0]
+        wins = int(row['wins'])
+        total = int(row['total_matches'])
+        lt = float(row['LT'])
+        win_rate = wins / total if total else 0.0
+        return {
+            "difficulty": diff,
+            "language": language,
+            "lt": lt,
+            "wins": wins,
+            "total": total,
+            "win_rate": win_rate,
+        }
 
-    # Then print language-specific rankings
-    for lang in ['english', 'japanese']:
-        if RICH_AVAILABLE and console:
-            console.print(f"\n=== {lang.title()} Rankings ===", style="bold underline")
-        else:
-            print(f"\n=== {lang.title()} Rankings ===")
-        for diff in ['all', 'easy', 'hard']:
-            try:
-                rankings = ranker.get_rankings(diff, lang)
-                rankings['llm'] = rankings['llm'].str.replace('__', '/')
-                display_rankings(console, rankings, f"Rankings for {lang.title()}({diff}) questions", test_model)
-            except ValueError as e:
-                if RICH_AVAILABLE and console:
-                    console.print(f"\nNo data available for {lang} {diff} difficulty", style="red")
-                else:
-                    print(f"\nNo data available for {lang} {diff} difficulty")
-                continue
-    
-    # Only save files if both model names are provided
-    if test_model and judge_model:
-        # Save rankings with safe model names
-        safe_model_name = test_model.replace("/", "__")
-        
-        # Create scores directory if it doesn't exist
-        os.makedirs('scores', exist_ok=True)
-        
-        # Save scores
-        scores_file = f'scores/{safe_model_name}_tl_bench_scores.jsonl'
-        
-        with open(scores_file, 'w') as f:
-            # Save overall rankings for each difficulty
-            for diff in ['all', 'easy', 'hard']:
-                try:
-                    rankings = ranker.get_rankings(diff)
-                    rankings['difficulty'] = diff
-                    rankings['language'] = 'all'
-                    rankings['llm'] = rankings['llm'].str.replace('__', '/')
-                    rankings.to_json(f, orient='records', lines=True)
-                except ValueError:
-                    continue
+    en_ja = {
+        "overall": extract_slice("all", "english"),
+        "easy": extract_slice("easy", "english"),
+        "hard": extract_slice("hard", "english"),
+    }
+    ja_en = {
+        "overall": extract_slice("all", "japanese"),
+        "easy": extract_slice("easy", "japanese"),
+        "hard": extract_slice("hard", "japanese"),
+    }
 
-            # Save language-specific rankings
-            for lang in ['english', 'japanese']:
-                for diff in ['all', 'easy', 'hard']:
-                    try:
-                        rankings = ranker.get_rankings(diff, lang)
-                        rankings['difficulty'] = diff
-                        rankings['language'] = lang
-                        rankings['llm'] = rankings['llm'].str.replace('__', '/')
-                        rankings.to_json(f, orient='records', lines=True)
-                    except ValueError:
-                        continue
-        
-        print(f"\nScores saved to: {scores_file}")
-        
-        print(f"\nRaw answers can be found at: {target_file}")
+    output_dir = default_results_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    scores_file = output_dir / "scores.json"
+
+    summary = {
+        "model": test_model,
+        "judge_model": judge_model,
+        "baseset_version": base_version,
+        "pairs_file": str(pairs_file) if pairs_file else None,
+        "judgments_file": str(judgments_file),
+        "timestamp_utc": datetime.utcnow().isoformat() + "Z",
+        "expected_pairs": expected_pairs,
+        "judged_pairs": judged_pairs,
+        "missing_pairs": missing_pairs,
+        "base_comparisons": base_comparisons_count,
+        "en_ja": en_ja,
+        "ja_en": ja_en,
+    }
+
+    with open(scores_file, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    print(f"\nScores saved to: {scores_file}")
+    print(f"Raw answers can be found at: {judgments_file}")
 
 if __name__ == "__main__":
     main()
