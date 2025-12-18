@@ -1,13 +1,57 @@
-# Shisa Translation Bench
+# shisa-jp-tl-bench
 
-This project provides a suite of tools to benchmark the translation capabilities of Large Language Models (LLMs) between English and Japanese. It uses a judge model to compare and rank the translation quality of a target model against a set of base models.
+`shisa-jp-tl-bench` is a pairwise, LLM-judged evaluation of Japanese ↔ English translation quality.
+
+We have an Easy and Hard set of translations that measures in each direction (JA->EN and EN->JA).
+
+Scoring is against a carefully designed fixed (versioned) "base set" designed to allow reliable scoring of models based on the win/loss outcomes.
+
+## Eval Summary
+
+- **Task:** ~70 prompts spanning English→Japanese and Japanese→English.
+- **Evaluation:** Pairwise A/B comparisons (test model vs anchors) judged by a configurable judge model.
+- **Scoring:** Win rate (WR%) plus Bradley–Terry-derived scores (EN, LT) for rankings.
+- **Reproducibility:** Comparisons are anchored to a versioned base set snapshot (`BASESET_SNAPSHOT_DIR`, default `baseset/v1.0`).
+
+## Base Set v1.0
+
+The v1.0 base set is a frozen snapshot of 20 anchor models used to keep scores comparable across runs. We selected anchors to cover a roughly even spread of win rates (from very strong to very weak baselines), which helps stabilize relative scoring for new models.
+
+The WR% and LT below are computed within the v1.0 anchor round-robin using the default judge (`gemini-2.5-flash`). Values will change if you re-judge the base set with a different judge.
+
+Terminology: WR% is the overall win rate in the anchor round-robin; LT/EN are 0–10 rescalings of the Bradley–Terry fit used by the tooling (`choix_analyzer.py`).
+
+| # | Model | Source | WR% | LT |
+| --- | --- | --- | --- | --- |
+| 1 | gemini-2.5-pro | `base_translations/gemini-2.5-pro.jsonl` | 96.15 | 9.94 |
+| 2 | gemini-2.5-flash | `base_translations/gemini-2.5-flash.jsonl` | 92.92 | 9.89 |
+| 3 | Qwen/Qwen3-30B-A3B-Instruct-2507 | `translations/Qwen__Qwen3-30B-A3B-Instruct-2507.jsonl` | 84.33 | 9.63 |
+| 4 | shisa-ai/shisa-v2-llama3.1-405b | `translations/shisa-ai__shisa-v2-llama3.1-405b.jsonl` | 81.45 | 9.49 |
+| 5 | openai/gpt-4o | `base_translations/openai__gpt-4o.jsonl` | 76.02 | 9.12 |
+| 6 | shisa-ai/shisa-v2-unphi4-14b | `translations/shisa-ai__shisa-v2-unphi4-14b.jsonl` | 72.81 | 8.83 |
+| 7 | tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5 | `base_translations/tokyotech-llm__Llama-3.1-Swallow-8B-Instruct-v0.5.jsonl` | 62.16 | 7.45 |
+| 8 | nvidia/NVIDIA-Nemotron-Nano-12B-v2 | `translations/nvidia__NVIDIA-Nemotron-Nano-12B-v2.jsonl` | 59.91 | 7.07 |
+| 9 | meta-llama/Llama-3.3-70B-Instruct | `base_translations/meta-llama__Llama-3.3-70B-Instruct.jsonl` | 58.05 | 6.74 |
+| 10 | microsoft/phi-4 | `base_translations/microsoft__phi-4.jsonl` | 49.80 | 5.13 |
+| 11 | cyberagent/Mistral-Nemo-Japanese-Instruct-2408 | `base_translations/cyberagent__Mistral-Nemo-Japanese-Instruct-2408.jsonl` | 47.52 | 4.69 |
+| 12 | Qwen/Qwen3-4B | `base_translations/Qwen__Qwen3-4B.jsonl` | 44.68 | 4.11 |
+| 13 | LiquidAI/LFM2-2.6B | `translations/LiquidAI__LFM2-2.6B.jsonl` | 43.83 | 3.92 |
+| 14 | meta-llama/Llama-3.1-8B-Instruct | `translations/meta-llama__Llama-3.1-8B-Instruct.jsonl` | 38.84 | 2.95 |
+| 15 | microsoft/Phi-4-mini-instruct | `translations/microsoft__Phi-4-mini-instruct.jsonl` | 24.94 | 0.98 |
+| 16 | augmxnt/shisa-7b-v1 | `base_translations/augmxnt__shisa-7b-v1.jsonl` | 21.36 | 0.68 |
+| 17 | meta-llama/Llama-3.2-3B-Instruct | `translations/meta-llama__Llama-3.2-3B-Instruct.jsonl` | 19.18 | 0.54 |
+| 18 | Rakuten/RakutenAI-2.0-mini-instruct | `translations/Rakuten__RakutenAI-2.0-mini-instruct.jsonl` | 14.20 | 0.29 |
+| 19 | LiquidAI/LFM2-350M | `translations/LiquidAI__LFM2-350M.jsonl` | 8.75 | 0.13 |
+| 20 | SakanaAI/TinySwallow-1.5B | `translations/SakanaAI__TinySwallow-1.5B.jsonl` | 2.52 | 0.03 |
+
+To switch base sets, set `BASESET_SNAPSHOT_DIR` to another snapshot directory (for example `baseset/v0.9`). For details on how snapshots are built (and how to create new versions like `v2.0`), see `baseset/README.md`.
 
 ## Installation
 
 To set up the environment, first create and activate a conda/mamba environment:
 
 ```bash
-mamba create -n shisa-jp-tl-bench python=3.10
+mamba create -n shisa-jp-tl-bench python=3.12
 mamba activate shisa-jp-tl-bench
 ```
 
@@ -64,7 +108,6 @@ If your API keys are stored in environment variables with different names, you c
 MODEL="my-local-model/my-model-7b-instruct" \
 OPENAI_URL="http://localhost:8000/v1" \
 MODEL_API_KEY_ENV="MY_CUSTOM_API_KEY" \
-
 JUDGE_MODEL="google/gemini-pro" \
 JUDGE_URL="https://generativelanguage.googleapis.com/v1beta/openai/" \
 JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
@@ -87,7 +130,7 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 1.  **Translate**: The script prompts the target model to translate a predefined set of ~70 English and Japanese text samples.
 2.  **Generate Pairs**: The new translations are paired up with existing translations from the base models in the frozen snapshot (by default `baseset/v1.0`) to create comparison pairs. `generate_shootout_data.py` reads the anchor translations directly from `BASESET_SNAPSHOT_DIR/translations`, so every run is evaluated against the same anchor set.
 3.  **Judge**: The judge model evaluates each pair and picks a winner. The analysis for each comparison is saved to the `analysis/` directory.
-4.  **Rank**: The script analyzes the win/loss data using a Bradley-Terry model to calculate scores and generate rankings. 
+4.  **Rank**: The script analyzes the win/loss data using a Bradley-Terry model to calculate scores and generate rankings.
 
 ## Output Files
 
