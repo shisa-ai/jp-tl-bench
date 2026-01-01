@@ -2,11 +2,12 @@
 
 **JP-TL-Bench** is an anchored, pairwise LLM-judged benchmark for Japanese ↔ English translation quality.
 
-Paper: [JP-TL-Bench: Anchored Pairwise LLM Evaluation for Bidirectional Japanese-English Translation](docs/paper.pdf)
+We have created a set of Easy and Hard translations for each direction (JA->EN and EN->JA).
 
-We have an Easy and Hard set of translations that measures in each direction (JA->EN and EN->JA).
+Scoring is done by an LLM-as-a-Judge against a carefully designed fixed (versioned) "Base Set" of reference model translations designed to allow reliable scoring of models based on the win/loss outcomes.
 
-Scoring is against a carefully designed fixed (versioned) "base set" designed to allow reliable scoring of models based on the win/loss outcomes.
+- Blog: [https://shisa.ai/posts/jp-tl-bench/](https://shisa.ai/posts/jp-tl-bench/)
+- Paper: [JP-TL-Bench: Anchored Pairwise LLM Evaluation for Bidirectional Japanese-English Translation](docs/paper.pdf)
 
 ## Eval Summary
 
@@ -85,7 +86,7 @@ The `run_translation_bench.sh` script is the main entry point for running the be
 This example runs the benchmark for a local model, using the default judge model (`gemini-2.5-flash`).
 
 ```bash
-MODEL="my-local-model/my-model-7b-instruct" \
+MODEL="shisa-ai/shisa-v2.1-qwen3-8b" \
 OPENAI_URL="http://localhost:8000/v1" \
 ./run_translation_bench.sh
 ```
@@ -95,19 +96,20 @@ OPENAI_URL="http://localhost:8000/v1" \
 This example uses a different model and API endpoint for the judge.
 
 ```bash
-MODEL="my-local-model/my-model-7b-instruct" \
+MODEL=""shisa-ai/shisa-v2.1-qwen3-8b" \
 OPENAI_URL="http://localhost:8000/v1" \
-JUDGE_MODEL="Nexusflow/Athene-V2-Chat" \
-JUDGE_URL="http://athene-v2/v1" \
+JUDGE_MODEL=""shisa-ai/shisa-v2-llama3.1-405b" \
+JUDGE_URL="http://shisa-v2-405b/v1" \
 ./run_translation_bench.sh
 ```
+Runtime depends on both your generation and judging concurrency/speeds, but we find most runs take between 15-30 minutes and the average cost for a run using `gemini-2.5-flash` as a judge is around $7 (USD). 
 
 ### Using Custom API Keys
 
 If your API keys are stored in environment variables with different names, you can specify them using `MODEL_API_KEY_ENV` and `JUDGE_API_KEY_ENV`.
 
 ```bash
-MODEL="my-local-model/my-model-7b-instruct" \
+MODEL=""shisa-ai/shisa-v2.1-qwen3-8b" \
 OPENAI_URL="http://localhost:8000/v1" \
 MODEL_API_KEY_ENV="MY_CUSTOM_API_KEY" \
 JUDGE_MODEL="google/gemini-pro" \
@@ -259,7 +261,7 @@ python utils/clean_analysis_file.py analysis/base_set.gemini-2.5-flash.jsonl
 
 ## Citation
 
-If you use JP-TL-Bench in your research, please cite our paper:
+If you use JP-TL-Bench in your research, you can cite this repo:
 
 ```bibtex
 @misc{jp-tl-bench,
