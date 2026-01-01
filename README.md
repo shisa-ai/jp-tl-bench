@@ -1,6 +1,8 @@
-# shisa-jp-tl-bench
+# JP-TL-Bench
 
-`shisa-jp-tl-bench` is a pairwise, LLM-judged evaluation of Japanese ↔ English translation quality.
+**JP-TL-Bench** is an anchored, pairwise LLM-judged benchmark for Japanese ↔ English translation quality.
+
+Paper: [JP-TL-Bench: Anchored Pairwise LLM Evaluation for Bidirectional Japanese-English Translation](docs/paper.pdf)
 
 We have an Easy and Hard set of translations that measures in each direction (JA->EN and EN->JA).
 
@@ -44,15 +46,15 @@ Terminology: WR% is the overall win rate in the anchor round-robin; LT/EN are 0�
 | 19 | LiquidAI/LFM2-350M | `translations/LiquidAI__LFM2-350M.jsonl` | 8.75 | 0.13 |
 | 20 | SakanaAI/TinySwallow-1.5B | `translations/SakanaAI__TinySwallow-1.5B.jsonl` | 2.52 | 0.03 |
 
-To switch base sets, set `BASESET_SNAPSHOT_DIR` to another snapshot directory (for example `baseset/v0.9`). For details on how snapshots are built (and how to create new versions like `v2.0`), see `baseset/README.md`.
+To switch base sets, set `BASESET_SNAPSHOT_DIR` to another snapshot directory (for example `baseset/v0.9`). For details on how snapshots are built (and how to create new versions like `v2.0`), see [baseset/README.md](baseset/README.md).
 
 ## Installation
 
 To set up the environment, first create and activate a conda/mamba environment:
 
 ```bash
-mamba create -n shisa-jp-tl-bench python=3.12
-mamba activate shisa-jp-tl-bench
+mamba create -n jp-tl-bench python=3.12
+mamba activate jp-tl-bench
 ```
 
 Then, install the required packages:
@@ -254,3 +256,20 @@ python utils/clean_analysis_file.py path/to/your/analysis_file.jsonl
 ```bash
 python utils/clean_analysis_file.py analysis/base_set.gemini-2.5-flash.jsonl
 ```
+
+## Citation
+
+If you use JP-TL-Bench in your research, please cite our paper:
+
+```bibtex
+@misc{jp-tl-bench,
+  title={JP-TL-Bench: Anchored Pairwise LLM Evaluation for Bidirectional Japanese-English Translation},
+  author={Shisa AI},
+  year={2025},
+  howpublished={\url{https://github.com/shisa-ai/jp-tl-bench}}
+}
+```
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
