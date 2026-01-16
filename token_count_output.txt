@@ -1,0 +1,78 @@
+============================================================
+JP-TL-Bench Token Count Analysis (Actual Data)
+============================================================
+
+INPUT TOKENS (per judgment)
+----------------------------------------
+  (includes prompt + anchor translation + candidate translation)
+  Average:  2,626 tokens
+  Std Dev:  3,009 tokens
+  Min:      648 tokens
+  Max:      65,674 tokens
+
+OUTPUT TOKENS (per judgment) - ACTUAL
+----------------------------------------
+  Average:  1,567 tokens
+  Std Dev:  1,107 tokens
+  Min:      59 tokens
+  Max:      52,717 tokens
+
+COST ESTIMATE (gemini-2.5-flash)
+----------------------------------------
+  Input:  $0.30/1M tokens
+  Output: $2.50/1M tokens
+  (thinking_budget=0, no thinking token cost)
+
+PER JUDGMENT
+  Input tokens:   2,626
+  Output tokens:  1,567
+  Input cost:     $0.000788
+  Output cost:    $0.003918
+  Total:          $0.004705
+
+FULL EVALUATION (1,400 judgments = 70 items × 20 anchors)
+----------------------------------------
+  Total input tokens:  3,675,992
+  Total output tokens: 2,193,939
+  Input cost:          $1.10
+  Output cost:         $5.48
+  TOTAL COST:          $6.59
+
+============================================================
+
+Sample Token Counts (first 30 judgments)
+----------------------------------------------------------------------
+#    Name                             Input       Output        Total
+----------------------------------------------------------------------
+1    essay_1                          5,003        1,140        6,143
+2    re_re_re_re_horror_1             6,379        2,221        8,600
+3    hbr1                             2,529        1,637        4,166
+4    catwoman1                        4,570        1,194        5,764
+5    hbr1                             2,524        2,954        5,478
+6    other_3                          4,269        1,761        6,030
+7    gaimann1                         4,677        1,259        5,936
+8    re_re_re_re_horror_1             5,873        2,296        8,169
+9    essay_1                          2,126       12,825       14,951
+10   howto2                           3,748        2,799        6,547
+11   hbr1                             2,521        1,181        3,702
+12   essay_1                          2,159       25,412       27,571
+13   essay_1                          2,032          947        2,979
+14   catwoman1                        4,355        1,226        5,581
+15   essay_1                          2,466          964        3,430
+16   essay_1                          2,410        8,608       11,018
+17   gaimann1                         4,227        1,293        5,520
+18   jdate2                           1,977        1,862        3,839
+19   hbr1                             2,486        1,123        3,609
+20   catwoman1                       11,171          875       12,046
+21   essay_1                          2,357        1,108        3,465
+22   other_1                          2,917        1,697        4,614
+23   other_1                          2,975        2,600        5,575
+24   gaimann1                         4,655        1,301        5,956
+25   sample_convo_9                   1,859          240        2,099
+26   kokushikan_1                     5,302        4,143        9,445
+27   catwoman1                       11,274        1,261       12,535
+28   essay_1                          2,138       39,034       41,172
+29   amazon_2                           886        1,427        2,313
+30   news_1                           1,305          688        1,993
+----------------------------------------------------------------------
+AVG  (all 14002 judgments)            2,626        1,567        4,193
