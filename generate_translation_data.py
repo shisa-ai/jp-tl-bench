@@ -22,6 +22,7 @@ class ModelConfig:
     top_p: Optional[float] = 0.85
     frequency_penalty: Optional[float] = None
     reasoning_effort: Optional[str] = None
+    prompt_file: Optional[str] = None  # Override prompt file path (relative to project root)
 
 class Translator:
     """Translates text using a specified model."""
@@ -85,6 +86,12 @@ class Translator:
                 reasoning_effort="low"
             )
         
+        # CAT-Translate - simple prompt, default sampling
+        if "cat-translate" in model_lower:
+            return ModelConfig(
+                prompt_file="prompts/translate_prompt_simple.txt"
+            )
+
         # Default configuration
         return ModelConfig()
 
@@ -99,15 +106,25 @@ class Translator:
 
     def get_prompt(self, input_data: dict) -> str:
         """Generate a prompt for translation using the appropriate template based on input language."""
-        english = input_data.get("english", True)
-        prompt_path = self.get_prompt_path(english)
+        model_config = self.get_model_config()
+        if model_config.prompt_file:
+            prompt_path = model_config.prompt_file
+        else:
+            english = input_data.get("english", True)
+            prompt_path = self.get_prompt_path(english)
 
         if not os.path.exists(prompt_path):
             raise SystemExit(f"Error: Missing prompt file: {prompt_path}. See README for setup.")
         
         with open(prompt_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
-        return prompt_template.replace("{{text}}", input_data["text"])
+        english = input_data.get("english", True)
+        src_lang, tgt_lang = ("English", "Japanese") if english else ("Japanese", "English")
+        return (prompt_template
+            .replace("{{text}}", input_data["text"])
+            .replace("{{src_lang}}", src_lang)
+            .replace("{{tgt_lang}}", tgt_lang)
+        )
 
     def parse(self, input_data: dict, response: str, prompt_text: str, generation_config: dict) -> dict:
         """Parse the model response along with the input data into the desired output format."""
