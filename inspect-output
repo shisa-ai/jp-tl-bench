@@ -14,7 +14,7 @@ from rich.console import Group
 from rich.table import Table
 from rich.text import Text
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent
 SCORES_DIR = BASE_DIR / "scores"
 BASESET_DIR = BASE_DIR / "baseset"
 TRANSLATIONS_DIR = BASE_DIR / "translations"
@@ -733,8 +733,8 @@ if App is not None:
             yield Header(show_clock=True)
             with Horizontal(id="body"):
                 with Vertical(id="sidebar"):
-                    yield Select(options=view_mode_options, value="comparisons", id="view-mode-select")
-                    yield Select(options=category_options, value="test_models", id="category-select")
+                    yield Select(options=view_mode_options, allow_blank=False, value="comparisons", id="view-mode-select")
+                    yield Select(options=category_options, allow_blank=False, value="test_models", id="category-select")
                     yield ListView(id="model-list")
                 with Vertical(id="main"):
                     yield Static("", id="content-summary")
@@ -799,10 +799,17 @@ if App is not None:
 
         def on_select_changed(self, event: Select.Changed) -> None:
             """Handle selection changes."""
-            if event.select.id == "category-select" and event.value:
-                self._change_category(str(event.value))
-            elif event.select.id == "view-mode-select" and event.value:
-                self.view_mode = str(event.value)
+            if event.value is None or event.value is Select.BLANK:
+                return
+
+            if event.select.id == "category-select":
+                category = str(event.value)
+                if category in {"test_models", "baseset_v1.0", "baseset_v0.9"}:
+                    self._change_category(category)
+            elif event.select.id == "view-mode-select":
+                view_mode = str(event.value)
+                if view_mode in {"comparisons", "translations"}:
+                    self.view_mode = view_mode
 
         def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
             """Handle model selection."""

@@ -204,7 +204,7 @@ After running benchmarks, you can interactively browse results using the Text Us
 **Usage:**
 
 ```bash
-python view_tl_bench_tui.py [OPTIONS]
+./inspect-output [OPTIONS]
 ```
 
 **Options:**
@@ -215,7 +215,7 @@ python view_tl_bench_tui.py [OPTIONS]
 **Example:**
 
 ```bash
-python view_tl_bench_tui.py
+./inspect-output
 ```
 
 **Viewing Modes:**
