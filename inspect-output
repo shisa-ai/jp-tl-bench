@@ -15,9 +15,8 @@ from rich.table import Table
 from rich.text import Text
 
 BASE_DIR = Path(__file__).resolve().parent
-SCORES_DIR = BASE_DIR / "scores"
+RESULTS_DIR = BASE_DIR / "results"
 BASESET_DIR = BASE_DIR / "baseset"
-TRANSLATIONS_DIR = BASE_DIR / "translations"
 
 try:
     from textual.app import App, ComposeResult
@@ -312,112 +311,174 @@ def load_comparison_detail(comparison_file: Path, metadata: ComparisonMetadata) 
 
 # ===== Score Loading =====
 
-def load_score_summary(score_file: Path, target_model: Optional[str] = None) -> Optional[ModelScores]:
-    """Load score summary from *_tl_bench_scores.jsonl file."""
+def load_score_summary_from_json(score_file: Path, model_name: str) -> Optional[ModelScores]:
+    """Load score summary from scores.json file (new format)."""
     if not score_file.exists():
         return None
 
-    if target_model is None:
-        target_model = score_file.name.replace("_tl_bench_scores.jsonl", "")
+    try:
+        with score_file.open("r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    target_safe = target_model.replace("/", "__") if "/" in target_model else target_model
+        safe_name = model_name.replace("/", "__")
 
-    with score_file.open("r", encoding="utf-8") as src:
-        for line in src:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                if data.get("difficulty") != "all":
-                    continue
+        # Extract scores from new format
+        en_data = data.get("en_ja", {}).get("overall", {})
+        ja_data = data.get("ja_en", {}).get("overall", {})
 
-                model_name = data.get("llm", "")
-                safe_name = model_name.replace("/", "__")
+        en_wins = en_data.get("wins", 0)
+        en_total = en_data.get("total", 0)
+        ja_wins = ja_data.get("wins", 0)
+        ja_total = ja_data.get("total", 0)
 
-                if safe_name == target_safe or model_name == target_model:
-                    wins = int(data.get("wins", 0))
-                    total = int(data.get("total_matches", 1))
+        total_wins = en_wins + ja_wins
+        total_matches = en_total + ja_total
 
-                    return ModelScores(
-                        model_name=model_name,
-                        safe_name=safe_name,
-                        score=safe_float(data.get("score")) or 0.0,
-                        wins=wins,
-                        total_matches=total,
-                        en_score=safe_float(data.get("EN")) or 0.0,
-                        lt_score=safe_float(data.get("LT")) or 0.0,
-                        win_rate=wins / total if total > 0 else 0.0,
-                    )
-            except (json.JSONDecodeError, ValueError):
-                continue
+        en_lt = safe_float(en_data.get("lt")) or 0.0
+        ja_lt = safe_float(ja_data.get("lt")) or 0.0
 
-    return None
+        # Average LT score
+        avg_lt = (en_lt + ja_lt) / 2 if (en_lt and ja_lt) else (en_lt or ja_lt)
+
+        return ModelScores(
+            model_name=model_name,
+            safe_name=safe_name,
+            score=avg_lt,
+            wins=total_wins,
+            total_matches=total_matches,
+            en_score=en_lt,
+            lt_score=ja_lt,
+            win_rate=total_wins / total_matches if total_matches > 0 else 0.0,
+        )
+    except (json.JSONDecodeError, ValueError, KeyError):
+        return None
 
 
 # ===== Model Loading Functions =====
 
-def load_test_models(scores_dir: Path, translations_dir: Path) -> List[ModelData]:
-    """Load test models from scores/ and translations/ directories."""
-    models: Dict[str, ModelData] = {}
+def load_results_models(results_dir: Path, version: str) -> List[ModelData]:
+    """Load models from results/VERSION/ directory structure."""
+    version_dir = results_dir / version
+    if not version_dir.exists():
+        return []
 
-    # Find score files
-    score_files_map = {}
-    for score_file in sorted(scores_dir.glob("*_tl_bench_scores.jsonl")):
-        safe_model = score_file.name.replace("_tl_bench_scores.jsonl", "")
-        score_files_map[safe_model] = score_file
+    models: List[ModelData] = []
 
-    # Find translation files
-    translation_files_map = {}
-    for trans_file in sorted(translations_dir.glob("*.jsonl")):
-        safe_model = trans_file.name.replace(".jsonl", "")
-        translation_files_map[safe_model] = trans_file
-
-    # Find comparison files
-    for comparison_file in sorted(scores_dir.glob("*.jsonl")):
-        if "_tl_bench_scores.jsonl" in comparison_file.name:
+    # Iterate through model directories
+    for model_dir in sorted(version_dir.iterdir()):
+        if not model_dir.is_dir():
             continue
 
-        base_name = comparison_file.name.replace(".jsonl", "")
+        model_name = model_dir.name
+        display_name = display_model_name(model_name)
 
-        matched_model = None
-        for safe_model in score_files_map.keys():
-            if base_name.startswith(safe_model + "."):
-                matched_model = safe_model
-                break
+        # Find judge directories (there may be multiple judges per model)
+        for judge_dir in sorted(model_dir.iterdir()):
+            if not judge_dir.is_dir():
+                continue
 
-        if not matched_model:
-            continue
+            judge_name = judge_dir.name
+            judgments_file = judge_dir / "judgments.jsonl"
+            pairs_file = judge_dir / "pairs.jsonl"
+            scores_file = judge_dir / "scores.json"
 
-        display_name = display_model_name(matched_model)
+            if not judgments_file.exists() and not pairs_file.exists():
+                continue
 
-        # Load comparison metadata
-        comparisons_metadata = load_comparison_metadata(comparison_file)
+            # Load scores
+            scores = load_score_summary_from_json(scores_file, model_name) if scores_file.exists() else None
 
-        # Load translation metadata if available
-        translation_file = translation_files_map.get(matched_model)
-        translations_metadata = []
-        if translation_file:
-            translations_metadata = load_translation_metadata(translation_file)
+            # Load comparison metadata from judgments file
+            comparisons_metadata = []
+            if judgments_file.exists():
+                comparisons_metadata = load_results_comparison_metadata(judgments_file)
 
-        # Load scores
-        scores = load_score_summary(score_files_map[matched_model], matched_model)
+            # Create unique identifier including judge
+            safe_name = f"{model_name}@{judge_name}"
+            full_display = f"{display_name} [{judge_name}]" if judge_name != model_name else display_name
 
-        if matched_model not in models:
-            models[matched_model] = ModelData(
-                safe_name=matched_model,
-                display_name=display_name,
+            models.append(ModelData(
+                safe_name=safe_name,
+                display_name=full_display,
                 scores=scores,
-                category="test_models",
-                comparison_file=comparison_file,
+                category=f"results_{version}",
+                comparison_file=judgments_file,
                 comparisons_metadata=comparisons_metadata,
-                translation_file=translation_file,
-                translations_metadata=translations_metadata,
-            )
-        else:
-            models[matched_model].comparisons_metadata.extend(comparisons_metadata)
+                translation_file=None,  # Translations not in this structure
+                translations_metadata=[],
+            ))
 
-    return sorted(models.values(), key=lambda m: m.display_name.lower())
+    return models
+
+
+def load_results_comparison_metadata(judgments_file: Path) -> List[ComparisonMetadata]:
+    """Load comparison metadata from results judgments.jsonl file."""
+    metadata_list: List[ComparisonMetadata] = []
+
+    if not judgments_file.exists():
+        return metadata_list
+
+    with judgments_file.open("r", encoding="utf-8") as f:
+        for idx, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+
+            try:
+                data = json.loads(line)
+
+                # Extract answer from analysis if not directly available
+                answer = data.get("answer", "")
+                if not answer and "analysis" in data:
+                    analysis_text = data["analysis"]
+                    if "<answer>A</answer>" in analysis_text:
+                        answer = "A"
+                    elif "<answer>B</answer>" in analysis_text:
+                        answer = "B"
+
+                metadata = ComparisonMetadata(
+                    index=idx,
+                    line_num=idx,
+                    name=data.get("name", "unknown"),
+                    english=data.get("english", False),
+                    difficulty=data.get("difficulty", "unknown"),
+                    comparison_id=data.get("id", str(idx)),
+                    llm_a=data.get("llm_a", ""),
+                    llm_b=data.get("llm_b", ""),
+                    answer=answer,
+                )
+                metadata_list.append(metadata)
+            except json.JSONDecodeError:
+                continue
+
+    return metadata_list
+
+
+def load_results_comparison_detail(judgments_file: Path, metadata: ComparisonMetadata) -> Optional[ComparisonDetail]:
+    """Lazy-load full comparison details from results judgments.jsonl."""
+    if not judgments_file.exists():
+        return None
+
+    try:
+        with judgments_file.open("r", encoding="utf-8") as f:
+            for i, line in enumerate(f):
+                if i == metadata.line_num:
+                    data = json.loads(line)
+                    formatted_data = data.get("formatted_data", "")
+                    source_text, translation_a, translation_b = parse_formatted_data(formatted_data)
+
+                    return ComparisonDetail(
+                        metadata=metadata,
+                        source_text=source_text,
+                        translation_a=translation_a,
+                        translation_b=translation_b,
+                        analysis=data.get("analysis", ""),
+                    )
+
+    except (json.JSONDecodeError, IOError):
+        return None
+
+    return None
 
 
 def load_baseset_models(baseset_dir: Path, version: str) -> List[ModelData]:
@@ -428,15 +489,19 @@ def load_baseset_models(baseset_dir: Path, version: str) -> List[ModelData]:
 
     models: List[ModelData] = []
 
-    # Find base_set comparison files
+    # Find base_set comparison files (judge comparisons)
     for comparison_file in sorted(version_dir.glob("base_set.*.jsonl")):
+        # Skip backup/original files
+        if ".original." in comparison_file.name:
+            continue
+
         judge_name = comparison_file.name.replace("base_set.", "").replace(".jsonl", "")
         comparisons_metadata = load_comparison_metadata(comparison_file)
 
         if not comparisons_metadata:
             continue
 
-        display_name = f"Base Set {version} ({judge_name})"
+        display_name = f"Base Set Comparisons ({judge_name})"
 
         models.append(ModelData(
             safe_name=f"baseset_{version}_{judge_name}",
@@ -463,7 +528,7 @@ def load_baseset_models(baseset_dir: Path, version: str) -> List[ModelData]:
 
             models.append(ModelData(
                 safe_name=f"baseset_{version}_{safe_model}",
-                display_name=f"{display_name} [{version}]",
+                display_name=f"{display_name}",
                 scores=None,
                 category=f"baseset_{version}",
                 comparison_file=None,
@@ -473,6 +538,25 @@ def load_baseset_models(baseset_dir: Path, version: str) -> List[ModelData]:
             ))
 
     return models
+
+
+def get_available_versions(results_dir: Path, baseset_dir: Path) -> Tuple[List[str], List[str]]:
+    """Get available versions from results and baseset directories."""
+    results_versions = []
+    if results_dir.exists():
+        for d in sorted(results_dir.iterdir()):
+            # Match vX.X pattern, exclude backups
+            if d.is_dir() and d.name.startswith("v") and "-backup" not in d.name:
+                results_versions.append(d.name)
+
+    baseset_versions = []
+    if baseset_dir.exists():
+        for d in sorted(baseset_dir.iterdir()):
+            # Match vX.X pattern, exclude backups
+            if d.is_dir() and d.name.startswith("v") and "-backup" not in d.name:
+                baseset_versions.append(d.name)
+
+    return results_versions, baseset_versions
 
 
 # ===== Rendering Functions =====
@@ -596,9 +680,9 @@ def build_comparison_renderable(detail: ComparisonDetail, test_model: str) -> Gr
 def main(argv: Optional[List[str]] = None) -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Fast interactive viewer for translations and comparisons.")
-    parser.add_argument("--scores-dir", type=Path, default=SCORES_DIR, help="Path to scores directory")
+    parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR, help="Path to results directory")
     parser.add_argument("--baseset-dir", type=Path, default=BASESET_DIR, help="Path to baseset directory")
-    parser.add_argument("--translations-dir", type=Path, default=TRANSLATIONS_DIR, help="Path to translations directory")
+    parser.add_argument("--version", type=str, default="v1.0", help="Default results version to load (e.g., v1.0)")
     args = parser.parse_args(argv)
 
     if App is None or TEXTUAL_IMPORT_ERROR is not None:
@@ -607,27 +691,50 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"Import error: {TEXTUAL_IMPORT_ERROR}")
         return 1
 
-    print("Loading models...")
-    test_models = load_test_models(args.scores_dir, args.translations_dir)
-    baseset_v10_models = load_baseset_models(args.baseset_dir, "v1.0")
-    baseset_v09_models = load_baseset_models(args.baseset_dir, "v0.9")
+    print("Scanning for available versions...")
+    results_versions, baseset_versions = get_available_versions(args.results_dir, args.baseset_dir)
+    print(f"Results versions: {results_versions or ['none']}")
+    print(f"Baseset versions: {baseset_versions or ['none']}")
 
-    all_models = test_models + baseset_v10_models + baseset_v09_models
+    print("\nLoading models...")
+
+    # Load results models for each version
+    results_by_version: Dict[str, List[ModelData]] = {}
+    for version in results_versions:
+        models = load_results_models(args.results_dir, version)
+        if models:
+            results_by_version[version] = models
+            print(f"  Results {version}: {len(models)} models")
+
+    # Load baseset models for each version
+    baseset_by_version: Dict[str, List[ModelData]] = {}
+    for version in baseset_versions:
+        models = load_baseset_models(args.baseset_dir, version)
+        if models:
+            baseset_by_version[version] = models
+            print(f"  Baseset {version}: {len(models)} models")
+
+    all_models: List[ModelData] = []
+    for models in results_by_version.values():
+        all_models.extend(models)
+    for models in baseset_by_version.values():
+        all_models.extend(models)
 
     if not all_models:
-        print(f"No models found")
+        print(f"No models found in {args.results_dir} or {args.baseset_dir}")
         return 1
 
     trans_count = sum(len(m.translations_metadata) for m in all_models)
     comp_count = sum(len(m.comparisons_metadata) for m in all_models)
-    print(f"Loaded {len(test_models)} test models, {len(baseset_v10_models)} v1.0 models, {len(baseset_v09_models)} v0.9 models")
-    print(f"Total: {trans_count} translations, {comp_count} comparisons")
+    print(f"\nTotal: {len(all_models)} models, {trans_count} translations, {comp_count} comparisons")
 
     app = TranslationBenchViewerApp(
         all_models=all_models,
-        test_models=test_models,
-        baseset_v10_models=baseset_v10_models,
-        baseset_v09_models=baseset_v09_models,
+        results_by_version=results_by_version,
+        baseset_by_version=baseset_by_version,
+        results_versions=results_versions,
+        baseset_versions=baseset_versions,
+        default_version=args.version,
     )
     app.run()
     return 0
@@ -705,16 +812,30 @@ if App is not None:
         def __init__(
             self,
             all_models: List[ModelData],
-            test_models: List[ModelData],
-            baseset_v10_models: List[ModelData],
-            baseset_v09_models: List[ModelData],
+            results_by_version: Dict[str, List[ModelData]],
+            baseset_by_version: Dict[str, List[ModelData]],
+            results_versions: List[str],
+            baseset_versions: List[str],
+            default_version: str = "v1.0",
         ) -> None:
             super().__init__()
             self.all_models = all_models
-            self.test_models = test_models
-            self.baseset_v10_models = baseset_v10_models
-            self.baseset_v09_models = baseset_v09_models
-            self.current_category = "test_models"
+            self.results_by_version = results_by_version
+            self.baseset_by_version = baseset_by_version
+            self.results_versions = results_versions
+            self.baseset_versions = baseset_versions
+            self.default_version = default_version
+
+            # Set default category
+            if default_version in results_by_version:
+                self.current_category = f"results_{default_version}"
+            elif results_versions:
+                self.current_category = f"results_{results_versions[0]}"
+            elif baseset_versions:
+                self.current_category = f"baseset_{baseset_versions[0]}"
+            else:
+                self.current_category = "none"
+
             self.selected_model: Optional[ModelData] = None
 
         def compose(self) -> ComposeResult:
@@ -724,17 +845,23 @@ if App is not None:
                 ("Translations (Individual)", "translations"),
             ]
 
-            category_options = [
-                ("Test Models", "test_models"),
-                ("Base Set v1.0", "baseset_v1.0"),
-                ("Base Set v0.9", "baseset_v0.9"),
-            ]
+            # Build category options dynamically
+            category_options = []
+            for version in self.results_versions:
+                count = len(self.results_by_version.get(version, []))
+                category_options.append((f"Results {version} ({count})", f"results_{version}"))
+            for version in self.baseset_versions:
+                count = len(self.baseset_by_version.get(version, []))
+                category_options.append((f"Baseset {version} ({count})", f"baseset_{version}"))
+
+            if not category_options:
+                category_options = [("No data", "none")]
 
             yield Header(show_clock=True)
             with Horizontal(id="body"):
                 with Vertical(id="sidebar"):
                     yield Select(options=view_mode_options, allow_blank=False, value="comparisons", id="view-mode-select")
-                    yield Select(options=category_options, allow_blank=False, value="test_models", id="category-select")
+                    yield Select(options=category_options, allow_blank=False, value=self.current_category, id="category-select")
                     yield ListView(id="model-list")
                 with Vertical(id="main"):
                     yield Static("", id="content-summary")
@@ -804,7 +931,7 @@ if App is not None:
 
             if event.select.id == "category-select":
                 category = str(event.value)
-                if category in {"test_models", "baseset_v1.0", "baseset_v0.9"}:
+                if category.startswith("results_") or category.startswith("baseset_"):
                     self._change_category(category)
             elif event.select.id == "view-mode-select":
                 view_mode = str(event.value)
@@ -828,12 +955,12 @@ if App is not None:
 
         def _get_models_for_category(self) -> List[ModelData]:
             """Get models for the current category."""
-            if self.current_category == "test_models":
-                return self.test_models
-            elif self.current_category == "baseset_v1.0":
-                return self.baseset_v10_models
-            elif self.current_category == "baseset_v0.9":
-                return self.baseset_v09_models
+            if self.current_category.startswith("results_"):
+                version = self.current_category.replace("results_", "")
+                return self.results_by_version.get(version, [])
+            elif self.current_category.startswith("baseset_"):
+                version = self.current_category.replace("baseset_", "")
+                return self.baseset_by_version.get(version, [])
             return []
 
         def _populate_models(self) -> None:
@@ -928,9 +1055,16 @@ if App is not None:
                 else:
                     details.update(Text(f"Failed to load translation details for {current_meta.name}"))
             else:
-                detail = load_comparison_detail(model.comparison_file, current_meta)
+                # Use appropriate loader based on category
+                if self.current_category.startswith("results_"):
+                    detail = load_results_comparison_detail(model.comparison_file, current_meta)
+                else:
+                    detail = load_comparison_detail(model.comparison_file, current_meta)
+
                 if detail:
-                    details.update(build_comparison_renderable(detail, model.safe_name))
+                    # Extract model name without judge suffix for display
+                    display_model = model.safe_name.split("@")[0] if "@" in model.safe_name else model.safe_name
+                    details.update(build_comparison_renderable(detail, display_model))
                 else:
                     details.update(Text(f"Failed to load comparison details for {current_meta.name}"))
 
