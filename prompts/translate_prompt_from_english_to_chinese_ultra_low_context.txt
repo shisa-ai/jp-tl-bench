@@ -3,3 +3,7 @@ Translate this English text into Chinese.
 <source_text>
 {{text}}
 </source_text>
+
+Before giving the final answer, briefly reason in <think> tags about the best wording and any needed structural changes for natural Chinese.
+
+Provide the final translation inside <translation> tags.

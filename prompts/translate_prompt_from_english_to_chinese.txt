@@ -11,7 +11,7 @@ Instructions:
 3. Preserve tone, register, and culturally important details.
 4. Keep terminology consistent throughout the translation.
 
-Before giving the final answer, briefly reason in <translation_analysis> tags about:
+Before giving the final answer, briefly reason in <think> tags about:
 - culturally specific references or implied context
 - wording choices that affect tone or register
 - structural changes needed for natural Chinese

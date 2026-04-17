@@ -138,3 +138,26 @@ def test_translator_outputs_generation_profile_id():
 
     assert parsed["generation_profile_id"] == "default"
     assert parsed["dataset_ref"]["resolved_revision"] == task.dataset.revision
+
+
+def test_chinese_translation_prompts_use_think_tags():
+    zh_prompt = (REPO_ROOT / "prompts" / "translate_prompt_from_chinese.txt").read_text(
+        encoding="utf-8"
+    )
+    en_to_zh_prompt = (
+        REPO_ROOT / "prompts" / "translate_prompt_from_english_to_chinese.txt"
+    ).read_text(encoding="utf-8")
+
+    assert "<think>" in zh_prompt
+    assert "<translation_analysis>" not in zh_prompt
+    assert "<think>" in en_to_zh_prompt
+    assert "<translation_analysis>" not in en_to_zh_prompt
+
+
+def test_japanese_translation_prompt_keeps_legacy_translation_analysis_tags():
+    jp_prompt = (REPO_ROOT / "prompts" / "translate_prompt_from_japanese.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert "<translation_analysis>" in jp_prompt
+    assert "<think>" not in jp_prompt
