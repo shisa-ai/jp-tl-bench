@@ -19,6 +19,26 @@ load_dotenv()
 
 FAILED_TRANSLATION_PREFIX = "[TRANSLATION FAILED:"
 
+REASONING_BLOCK_PATTERNS = (
+    re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<translation_analysis>.*?</translation_analysis>", re.DOTALL | re.IGNORECASE),
+)
+
+
+def strip_reasoning_blocks(text: str) -> str:
+    cleaned = text
+    for pattern in REASONING_BLOCK_PATTERNS:
+        cleaned = pattern.sub("", cleaned)
+    return cleaned
+
+
+def fallback_translation_text(response: str) -> str:
+    cleaned = strip_reasoning_blocks(response)
+    cleaned = cleaned.strip()
+    if cleaned:
+        return cleaned
+    return response.strip()
+
 @dataclass
 class GenerationAdapter:
     """Reusable model/provider generation configuration."""
@@ -204,20 +224,12 @@ class Translator:
         if generation_config is None:
             generation_config = prompt_path
             prompt_path = "<in-memory>"
-        matches = re.findall(r'<translation>(.*?)</translation>', response, re.DOTALL)
-        if not matches:
-            print(f"Error: No translation tags found in response for input: {input_data['name']}")
-            analysis_split = response.split('</translation_analysis>')
-            if len(analysis_split) > 1:
-                print(f"Found </translation_analysis> tag, using text after it for input: {input_data['name']}")
-                filtered_response = analysis_split[1]
-                filtered_matches = re.findall(r'<translation>(.*?)</translation>', filtered_response, re.DOTALL)
-                translation = filtered_matches[-1] if filtered_matches else filtered_response
-            else:
-                print(f"No </translation_analysis> tag found, using full response for input: {input_data['name']}")
-                translation = response
+        matches = re.findall(r"<translation>(.*?)</translation>", response, re.DOTALL | re.IGNORECASE)
+        if matches:
+            translation = matches[-1].strip()
         else:
-            translation = matches[-1]
+            print(f"Error: No translation tags found in response for input: {input_data['name']}")
+            translation = fallback_translation_text(response)
 
         return {
             **self.build_output_base(input_data, prompt_text, prompt_path),
