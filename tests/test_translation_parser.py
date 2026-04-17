@@ -1,17 +1,29 @@
+import importlib
 import sys
 import types
 from types import MethodType
 
-if "dotenv" not in sys.modules:
-    dotenv_stub = types.ModuleType("dotenv")
-    dotenv_stub.load_dotenv = lambda *args, **kwargs: None
-    sys.modules["dotenv"] = dotenv_stub
 
-from generate_translation_data import Translator
+def load_translator_class():
+    dotenv_was_present = "dotenv" in sys.modules
+    original_dotenv = sys.modules.get("dotenv")
+    if not dotenv_was_present:
+        dotenv_stub = types.ModuleType("dotenv")
+        dotenv_stub.load_dotenv = lambda *args, **kwargs: None
+        sys.modules["dotenv"] = dotenv_stub
+
+    try:
+        return importlib.import_module("generate_translation_data").Translator
+    finally:
+        if not dotenv_was_present:
+            sys.modules.pop("dotenv", None)
+        else:
+            sys.modules["dotenv"] = original_dotenv
 
 
 def build_translator():
-    translator = Translator(
+    translator_class = load_translator_class()
+    translator = translator_class(
         model_name="fixture-model",
         base_url="https://example.com/v1",
         api_key="test-key",
