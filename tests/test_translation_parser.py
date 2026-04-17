@@ -104,3 +104,51 @@ def test_parse_ignores_stray_think_tags_when_translation_exists():
         {"temperature": 0.1},
     )
     assert parsed["translation"] == "Bonjour"
+
+
+def test_parse_fallback_prefers_suffix_after_last_reasoning_block():
+    translator = build_translator()
+    parsed = translator.parse(
+        base_item(),
+        "Preface that should not survive\n<think>private reasoning</think>\nFinal answer only",
+        "prompt body",
+        "prompt template",
+        {"temperature": 0.1},
+    )
+    assert parsed["translation"] == "Final answer only"
+
+
+def test_parse_fallback_discards_reasoning_only_think_response():
+    translator = build_translator()
+    parsed = translator.parse(
+        base_item(),
+        "<think>private chain of thought only</think>",
+        "prompt body",
+        "prompt template",
+        {"temperature": 0.1},
+    )
+    assert parsed["translation"] == ""
+
+
+def test_parse_fallback_discards_reasoning_only_translation_analysis_response():
+    translator = build_translator()
+    parsed = translator.parse(
+        base_item(),
+        "<translation_analysis>legacy reasoning only</translation_analysis>",
+        "prompt body",
+        "prompt template",
+        {"temperature": 0.1},
+    )
+    assert parsed["translation"] == ""
+
+
+def test_parse_prefers_last_translation_tag():
+    translator = build_translator()
+    parsed = translator.parse(
+        base_item(),
+        "<translation>draft</translation>\n<think>scratchpad</think>\n<translation>final answer</translation>",
+        "prompt body",
+        "prompt template",
+        {"temperature": 0.1},
+    )
+    assert parsed["translation"] == "final answer"

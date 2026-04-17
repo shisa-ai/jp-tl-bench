@@ -23,6 +23,7 @@ REASONING_BLOCK_PATTERNS = (
     re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<translation_analysis>.*?</translation_analysis>", re.DOTALL | re.IGNORECASE),
 )
+REASONING_CLOSING_TAG_PATTERN = re.compile(r"</(?:think|translation_analysis)>", re.IGNORECASE)
 
 
 def strip_reasoning_blocks(text: str) -> str:
@@ -33,11 +34,12 @@ def strip_reasoning_blocks(text: str) -> str:
 
 
 def fallback_translation_text(response: str) -> str:
-    cleaned = strip_reasoning_blocks(response)
-    cleaned = cleaned.strip()
-    if cleaned:
-        return cleaned
-    return response.strip()
+    stripped_response = response.strip()
+    closing_matches = list(REASONING_CLOSING_TAG_PATTERN.finditer(stripped_response))
+    if closing_matches:
+        suffix = stripped_response[closing_matches[-1].end():]
+        return strip_reasoning_blocks(suffix).strip()
+    return strip_reasoning_blocks(stripped_response).strip()
 
 @dataclass
 class GenerationAdapter:
