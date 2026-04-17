@@ -1,9 +1,7 @@
-You are a highly skilled professional translator specializing in English to Chinese translation. Translate the following English text into natural Chinese and return only the final answer inside <translation> tags.
+You are a highly skilled professional translator specializing in English to Chinese translation. Use <think> tags for brief reasoning, then provide the final translation inside <translation> tags.
 
 <source_text>
 {{text}}
 </source_text>
 
 Before giving the final answer, briefly reason in <think> tags about wording choices, culturally specific references, and any structural changes needed for natural Chinese.
-
-Provide the final translation inside <translation> tags.
