@@ -1,8 +1,9 @@
 import json
 from pathlib import Path
 
-import yaml
 from click.testing import CliRunner
+import pytest
+import yaml
 
 from benchmark_tasks import load_task_config
 from generate_translation_data import Translator, main as generate_translation_data_cli
@@ -11,6 +12,25 @@ from generate_translation_data import Translator, main as generate_translation_d
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JP_TASK_PATH = REPO_ROOT / "benchmark_tasks" / "translation_ja_en_bidirectional_v1.yaml"
 ZH_TASK_PATH = REPO_ROOT / "benchmark_tasks" / "translation_zh_en_bidirectional_v1.yaml"
+
+
+def _configured_translation_prompt_paths(task_path):
+    task_payload = yaml.safe_load(task_path.read_text(encoding="utf-8"))
+    return [
+        prompt_path
+        for direction in task_payload["directions"]
+        for prompt_path in direction["translation_prompts"].values()
+    ]
+
+
+ZH_PROMPT_PATHS = sorted(_configured_translation_prompt_paths(ZH_TASK_PATH))
+JP_PROMPT_PATHS = sorted(_configured_translation_prompt_paths(JP_TASK_PATH))
+JP_DEFAULT_PROMPT_PATHS = sorted(
+    {
+        "prompts/translate_prompt_from_english.txt",
+        "prompts/translate_prompt_from_japanese.txt",
+    }
+)
 
 
 def test_translator_supports_generic_direction_prompt_with_language_placeholders(tmp_path):
@@ -140,24 +160,26 @@ def test_translator_outputs_generation_profile_id():
     assert parsed["dataset_ref"]["resolved_revision"] == task.dataset.revision
 
 
-def test_chinese_translation_prompts_use_think_tags():
-    zh_prompt = (REPO_ROOT / "prompts" / "translate_prompt_from_chinese.txt").read_text(
-        encoding="utf-8"
-    )
-    en_to_zh_prompt = (
-        REPO_ROOT / "prompts" / "translate_prompt_from_english_to_chinese.txt"
-    ).read_text(encoding="utf-8")
+@pytest.mark.parametrize("prompt_path", ZH_PROMPT_PATHS)
+def test_chinese_translation_prompts_use_think_tags(prompt_path):
+    prompt_text = (REPO_ROOT / prompt_path).read_text(encoding="utf-8")
 
-    assert "<think>" in zh_prompt
-    assert "<translation_analysis>" not in zh_prompt
-    assert "<think>" in en_to_zh_prompt
-    assert "<translation_analysis>" not in en_to_zh_prompt
+    assert "<think>" in prompt_text
+    assert "<translation_analysis>" not in prompt_text
 
 
-def test_japanese_translation_prompt_keeps_legacy_translation_analysis_tags():
-    jp_prompt = (REPO_ROOT / "prompts" / "translate_prompt_from_japanese.txt").read_text(
-        encoding="utf-8"
-    )
+@pytest.mark.parametrize("prompt_path", JP_PROMPT_PATHS)
+def test_japanese_translation_prompts_do_not_use_think_tags(prompt_path):
+    prompt_text = (REPO_ROOT / prompt_path).read_text(encoding="utf-8")
 
-    assert "<translation_analysis>" in jp_prompt
-    assert "<think>" not in jp_prompt
+    assert "<think>" not in prompt_text
+
+
+@pytest.mark.parametrize("prompt_path", JP_DEFAULT_PROMPT_PATHS)
+def test_japanese_default_translation_prompts_keep_legacy_translation_analysis_tags(
+    prompt_path,
+):
+    prompt_text = (REPO_ROOT / prompt_path).read_text(encoding="utf-8")
+
+    assert "<translation_analysis>" in prompt_text
+    assert "<think>" not in prompt_text
