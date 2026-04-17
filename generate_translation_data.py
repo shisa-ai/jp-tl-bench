@@ -12,6 +12,9 @@ import concurrent.futures
 import threading
 from dataclasses import dataclass
 from typing import Optional
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from benchmark_tasks import load_task_config, resolve_dataset_ref
 
@@ -24,6 +27,10 @@ REASONING_BLOCK_PATTERNS = (
     re.compile(r"<translation_analysis>.*?</translation_analysis>", re.DOTALL | re.IGNORECASE),
 )
 REASONING_CLOSING_TAG_PATTERN = re.compile(r"</(?:think|translation_analysis)>", re.IGNORECASE)
+
+
+class CompletionBudgetError(RuntimeError):
+    """Raised when a prompt leaves no room for a completion."""
 
 
 def strip_reasoning_blocks(text: str) -> str:
@@ -135,6 +142,8 @@ class Translator:
         self.dataset_ref = dataset_ref or self.task_config.dataset.to_dict()
         self.low_context = low_context
         self.ultra_low_context = ultra_low_context
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         self.client = OpenAI(
             base_url=base_url,
             api_key=api_key,
@@ -144,6 +153,7 @@ class Translator:
         self.failed_items = []
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
         self.max_tokens = max_tokens
+        self._tokenize_supported: Optional[bool] = None
 
     def get_generation_adapter(self) -> GenerationAdapter:
         return resolve_generation_adapter(self.model_name)
@@ -184,6 +194,66 @@ class Translator:
             .replace("{{tgt_lang}}", tgt_lang)
         )
         return prompt_text, prompt_path
+
+    def get_tokenize_url(self) -> str:
+        parsed = urllib.parse.urlsplit(self.base_url)
+        path = parsed.path.rstrip("/")
+        if path.endswith("/v1"):
+            path = path[:-3]
+        tokenize_path = f"{path}/tokenize" if path else "/tokenize"
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, tokenize_path, "", ""))
+
+    def get_prompt_token_budget(self, prompt_text: str) -> Optional[tuple[int, int]]:
+        if self._tokenize_supported is False:
+            return None
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        request = urllib.request.Request(
+            self.get_tokenize_url(),
+            data=json.dumps(
+                {
+                    "model": self.model_name,
+                    "messages": [{"role": "user", "content": prompt_text}],
+                }
+            ).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code in {401, 403, 404, 405, 501}:
+                self._tokenize_supported = False
+            return None
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError):
+            return None
+
+        prompt_tokens = payload.get("count")
+        max_model_len = payload.get("max_model_len")
+        if not isinstance(prompt_tokens, int) or not isinstance(max_model_len, int):
+            return None
+
+        self._tokenize_supported = True
+        return prompt_tokens, max_model_len
+
+    def resolve_max_tokens(self, prompt_text: str) -> int:
+        token_budget = self.get_prompt_token_budget(prompt_text)
+        if token_budget is None:
+            return self.max_tokens
+
+        prompt_tokens, max_model_len = token_budget
+        remaining_tokens = max_model_len - prompt_tokens
+        if remaining_tokens <= 0:
+            raise CompletionBudgetError(
+                f"No completion budget remains after tokenizing prompt "
+                f"({prompt_tokens}/{max_model_len} tokens used)."
+            )
+        return min(self.max_tokens, remaining_tokens)
 
     def build_output_base(self, input_data: dict, prompt_text: str, prompt_path: str) -> dict:
         normalized = self.task_config.normalize_record(input_data, require_source_text=True)
@@ -246,6 +316,43 @@ class Translator:
             "generation_config": generation_config
         }
 
+    def build_failed_result(
+        self,
+        item: dict,
+        prompt_text: str,
+        prompt_path: str,
+        error_msg: str,
+        profile_id: str,
+        max_tokens: int,
+    ) -> dict:
+        self.failed_items.append(
+            {
+                "name": item.get("name", "unknown"),
+                "error": error_msg,
+            }
+        )
+        placeholder_translation = f"{FAILED_TRANSLATION_PREFIX} {error_msg}]"
+        return {
+            **self.build_output_base(item, prompt_text, prompt_path),
+            "status": "failed",
+            "generation_profile_id": profile_id,
+            "full_response": "",
+            "translation": placeholder_translation,
+            "temperature": None,
+            "top_p": None,
+            "frequency_penalty": None,
+            "reasoning_effort": None,
+            "generation_config": {
+                "error": error_msg,
+                "profile_id": profile_id,
+                "temperature": None,
+                "top_p": None,
+                "frequency_penalty": None,
+                "reasoning_effort": None,
+                "max_tokens": max_tokens,
+            },
+        }
+
     def translate_item(self, item: dict) -> dict:
         """Translates a single item with retry logic and concurrency control."""
         # Add jitter to spread out requests
@@ -262,17 +369,30 @@ class Translator:
                     self.task_config.normalize_record(item)["target_language"],
                 )
 
+            generation_adapter = self.get_generation_adapter()
+            try:
+                effective_max_tokens = self.resolve_max_tokens(prompt_text)
+            except CompletionBudgetError as exc:
+                error_msg = f"API error: {type(exc).__name__}: {str(exc)}"
+                print(f"Failed to process item {item.get('name', 'unknown')}: {error_msg}")
+                return self.build_failed_result(
+                    item,
+                    prompt_text,
+                    prompt_path,
+                    error_msg,
+                    generation_adapter.profile_id,
+                    0,
+                )
+
             max_retries = 5
             base_delay = 1
 
             for attempt in range(max_retries + 1):
                 try:
-                    # Get model-specific configuration
-                    generation_adapter = self.get_generation_adapter()
                     params = generation_adapter.build_request(
                         model_name=self.model_name,
                         prompt_text=prompt_text,
-                        max_tokens=self.max_tokens,
+                        max_tokens=effective_max_tokens,
                     )
 
                     # Create generation config for saving
@@ -297,39 +417,17 @@ class Translator:
                 except Exception as e:
                     error_msg = f"API error: {type(e).__name__}: {str(e)}"
                     if attempt == max_retries:
-                        # Track failed item
-                        failed_item = {
-                            "name": item.get("name", "unknown"),
-                            "error": error_msg,
-                            "attempts": max_retries + 1,
-                        }
-                        self.failed_items.append(failed_item)
                         print(
                             f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}"
                         )
-                        # Return a placeholder result so downstream scripts
-                        # always see the full set of items.
-                        placeholder_translation = f"{FAILED_TRANSLATION_PREFIX} {error_msg}]"
-                        return {
-                            **self.build_output_base(item, prompt_text, prompt_path),
-                            "status": "failed",
-                            "generation_profile_id": self.get_generation_adapter().profile_id,
-                            "full_response": "",
-                            "translation": placeholder_translation,
-                            "temperature": None,
-                            "top_p": None,
-                            "frequency_penalty": None,
-                            "reasoning_effort": None,
-                            "generation_config": {
-                                "error": error_msg,
-                                "profile_id": self.get_generation_adapter().profile_id,
-                                "temperature": None,
-                                "top_p": None,
-                                "frequency_penalty": None,
-                                "reasoning_effort": None,
-                                "max_tokens": self.max_tokens,
-                            },
-                        }
+                        return self.build_failed_result(
+                            item,
+                            prompt_text,
+                            prompt_path,
+                            error_msg,
+                            generation_adapter.profile_id,
+                            effective_max_tokens,
+                        )
                     delay = base_delay * (2 ** attempt)
                     print(
                         f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s..."

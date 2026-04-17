@@ -47,6 +47,7 @@ These are the current workflow surfaces. Treat them as examples of the present p
 - Keep changes scoped to one pipeline concern at a time: generation, pairing, judging, scoring, visualization, snapshotting, or documentation.
 - Prefer neutral terms like `source language`, `target language`, `judge`, `snapshot`, `slice`, and `artifact` over hardcoded assumptions about one language pair.
 - Keep judge-specific behavior isolated and explicit. Do not let one provider or one model silently define the generic path.
+- For local generation via vLLM, prefer startup settings that target roughly `20` concurrent requests and about `12k` context length when the model, runtime, and VRAM allow it. Only fall back to lower concurrency or shorter context after confirming that model limits, vLLM validation, or environment constraints require it.
 - Preserve reproducibility. A result should remain attributable to a specific snapshot/base-set version, test model, and judge configuration.
 - Reuse expensive artifacts when possible. Do not casually force regeneration of judgments or other costly outputs unless the task requires it.
 - If you change a prompt, parser, output schema, or artifact path, update the nearby docs and downstream consumers in the same change.
