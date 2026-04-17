@@ -25,6 +25,11 @@ def _configured_translation_prompt_paths(task_path):
 
 ZH_PROMPT_PATHS = sorted(_configured_translation_prompt_paths(ZH_TASK_PATH))
 JP_PROMPT_PATHS = sorted(_configured_translation_prompt_paths(JP_TASK_PATH))
+JP_PROMPT_PATHS_WITH_TRANSLATION = [
+    prompt_path
+    for prompt_path in JP_PROMPT_PATHS
+    if not prompt_path.endswith("ultra_low_context.txt")
+]
 JP_DEFAULT_PROMPT_PATHS = sorted(
     {
         "prompts/translate_prompt_from_english.txt",
@@ -166,6 +171,7 @@ def test_chinese_translation_prompts_use_think_tags(prompt_path):
 
     assert "<think>" in prompt_text
     assert "<translation_analysis>" not in prompt_text
+    assert "<translation>" in prompt_text
 
 
 @pytest.mark.parametrize("prompt_path", JP_PROMPT_PATHS)
@@ -173,6 +179,13 @@ def test_japanese_translation_prompts_do_not_use_think_tags(prompt_path):
     prompt_text = (REPO_ROOT / prompt_path).read_text(encoding="utf-8")
 
     assert "<think>" not in prompt_text
+
+
+@pytest.mark.parametrize("prompt_path", JP_PROMPT_PATHS_WITH_TRANSLATION)
+def test_japanese_translation_prompts_use_translation_tags(prompt_path):
+    prompt_text = (REPO_ROOT / prompt_path).read_text(encoding="utf-8")
+
+    assert "<translation>" in prompt_text
 
 
 @pytest.mark.parametrize("prompt_path", JP_DEFAULT_PROMPT_PATHS)
@@ -183,3 +196,4 @@ def test_japanese_default_translation_prompts_keep_legacy_translation_analysis_t
 
     assert "<translation_analysis>" in prompt_text
     assert "<think>" not in prompt_text
+    assert "<translation>" in prompt_text
