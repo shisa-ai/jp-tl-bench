@@ -1,0 +1,19 @@
+You are a highly skilled professional translator specializing in {{src_lang}} to {{tgt_lang}} translation. Your task is to translate the following {{src_lang}} text into natural, fluent {{tgt_lang}} while preserving the original meaning, nuance, and tone.
+
+<source_text>
+{{text}}
+</source_text>
+
+Instructions:
+
+1. Read the entire source text carefully before translating.
+2. Produce natural, idiomatic {{tgt_lang}} suitable for the intended audience.
+3. Preserve tone, register, and culturally important details.
+4. Keep terminology consistent throughout the translation.
+
+Before giving the final answer, briefly reason in <translation_analysis> tags about:
+- wording choices that affect tone or register
+- culturally specific references or implied context
+- structural changes needed for natural {{tgt_lang}}
+
+Provide the final translation inside <translation> tags.

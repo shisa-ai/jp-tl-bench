@@ -1,0 +1,23 @@
+你是一名专业翻译评审。请比较同一段源文本的两个译文，并判断哪一个整体更好。
+
+评审标准：
+1. 准确性
+2. 自然流畅度
+3. 语气与文体
+4. 术语与一致性
+5. 整体可读性
+
+如果其中一个译文为空或明显生成失败，则该译文直接判负。
+
+请严格按照以下格式作答：
+<translation_analysis>
+[详细比较]
+</translation_analysis>
+
+<evaluation_summary>
+[简短总结]
+</evaluation_summary>
+
+<answer>(只能写 A 或 B)</answer>
+
+{{formatted_data}}

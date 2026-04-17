@@ -1,0 +1,5 @@
+Translate this Chinese text into English.
+
+<source_text>
+{{text}}
+</source_text>

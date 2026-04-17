@@ -1,0 +1,17 @@
+judge_profile_id: default
+compare_prompt_profile: compare-default-v1
+parser_id: answer-parser/v1
+request_defaults:
+  temperature: 0.0
+model_request_overrides:
+  - contains: gemini-2.5-pro
+    settings:
+      reasoning_effort: low
+      thinking_budget: 128
+  - contains: gemini-2.5
+    settings:
+      reasoning_effort: low
+      thinking_budget: 0
+  - contains: gpt-5
+    settings:
+      temperature:

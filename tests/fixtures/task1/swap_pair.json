@@ -1,0 +1,26 @@
+{
+  "id": "a3553cc5f4bcf5a532be903c1aaa6c9e",
+  "llm_a": "shisa-ai__chotto-e4b-20260408",
+  "llm_b": "shisa-ai__shisa-v2-unphi4-14b",
+  "formatted_data": "## Name: simple_1\n\n## Source Text:\n    例１：\n    はじめまして。黄其正と申します。台湾から参りました。わたしは大学の近くの苺荘というアパートに住んでいます。日本は初めてなのでまだ何もわかりませんが、よろしくお願いします。\n\n→ 音声ファイルを再生する \n\n    例２：\n    みなさん、はじめまして。内山といいます。北国の新潟から来ました。趣味は料理と競馬です。早く中国語を覚えてみなさんと話しができるようになりたいと思っています。どうぞよろしくお願いします。\n\n→ 音声ファイルを再生する \n\n    例３：\n    こんにちは。はじめまして。山田太郎です。ぼくは、南国 宮崎の出身です。大学では、経営学を専攻していました。カラオケが好きなので、みなさんぜひいっしょにいきましょう。どうぞよろしく。\n    \n\n## Translation A\n\nExample 1:\nHello. My name is Huang Qizheng. I've come from Taiwan. I live in an apartment called Ichigosou near the university. This is my first time in Japan, so I don't know much yet, but please be kind to me.\n\n→ Play audio file\n\nExample 2:\nHello everyone. My name is Uchiyama. I'm from Niigata in the north. My hobbies are cooking and horse racing. I hope to learn Chinese soon so I can talk with all of you. I look forward to getting to know you all.\n\n→ Play audio file\n\nExample 3:\nHi. Nice to meet you. I'm Taro Yamada. I'm originally from Miyazaki in the south. At university, I majored in Business Administration. I love karaoke, so let's all go together sometime! Nice to meet you.\n\n\n## Translation B\n  \n**Example 1:**  \n\"Nice to meet you. My name is Huang Ching-Cheng. I’ve come from Taiwan. I live in an apartment called Ichigo-so near the university. This is my first time in Japan, so I don’t know much yet, but I look forward to getting to know you.\"  \n\n**Example 2:**  \n\"Hello, everyone. Nice to meet you. My name is Uchiyama. I’m from Niigata in the north. My hobbies are cooking and horse racing. I’d love to learn Chinese soon so I can chat with all of you. Please take care of me.\"  \n\n**Example 3:**  \n\"Hello, nice to meet you. I’m Yamada Taro. I’m from Miyazaki in the south. I majored in business administration at university. I love karaoke, so please join me sometime! I look forward to meeting you.\"  \n\n\n---\n",
+  "name": "simple_1",
+  "english": false,
+  "difficulty": "easy",
+  "llm_a_low_context": false,
+  "llm_a_ultra_low_context": false,
+  "llm_a_temperature": 0.1,
+  "llm_a_generation_config": {
+    "model": "shisa-ai/chotto-e4b-20260408",
+    "temperature": 0.1,
+    "top_p": 0.85,
+    "max_tokens": 4096
+  },
+  "llm_b_low_context": false,
+  "llm_b_ultra_low_context": false,
+  "llm_b_temperature": 0.1,
+  "llm_b_generation_config": {
+    "model": "shisa-ai/shisa-v2-unphi4-14b",
+    "temperature": 0.1,
+    "top_p": 0.85
+  }
+}

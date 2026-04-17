@@ -1,0 +1,61 @@
+{
+  "model": "shisa-ai/chotto-e4b-20260408",
+  "judge_model": "gemini-2.5-flash",
+  "baseset_version": "v1.0-sample",
+  "expected_pairs": 8,
+  "judged_pairs": 8,
+  "missing_pairs": 0,
+  "base_comparisons": 4,
+  "en_ja": {
+    "overall": {
+      "difficulty": "all",
+      "language": "english",
+      "lt": 9.99998842254984,
+      "wins": 4,
+      "total": 4,
+      "win_rate": 1.0
+    },
+    "easy": {
+      "difficulty": "easy",
+      "language": "english",
+      "lt": 9.99988594322056,
+      "wins": 2,
+      "total": 2,
+      "win_rate": 1.0
+    },
+    "hard": {
+      "difficulty": "hard",
+      "language": "english",
+      "lt": 9.99988594322056,
+      "wins": 2,
+      "total": 2,
+      "win_rate": 1.0
+    }
+  },
+  "ja_en": {
+    "overall": {
+      "difficulty": "all",
+      "language": "japanese",
+      "lt": 9.999209403790188,
+      "wins": 4,
+      "total": 4,
+      "win_rate": 1.0
+    },
+    "easy": {
+      "difficulty": "easy",
+      "language": "japanese",
+      "lt": 9.98619215660706,
+      "wins": 2,
+      "total": 2,
+      "win_rate": 1.0
+    },
+    "hard": {
+      "difficulty": "hard",
+      "language": "japanese",
+      "lt": 9.999780319583916,
+      "wins": 2,
+      "total": 2,
+      "win_rate": 1.0
+    }
+  }
+}

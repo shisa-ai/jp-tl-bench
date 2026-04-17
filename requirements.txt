@@ -6,6 +6,8 @@ numpy
 openai
 pandas
 python-dotenv
+PyYAML
+pytest
 rich
 textual
 tqdm

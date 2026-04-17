@@ -20,6 +20,11 @@ CONCURRENCY_LIMIT = int(os.getenv("BACKFILL_CONCURRENCY_LIMIT", "30"))
 SAFE_JUDGE_MODEL = JUDGE_MODEL.replace("/", "__")
 BACKFILL_FILE = ROOT.parent / "base_sets" / f"base_set.{SAFE_JUDGE_MODEL}.jsonl"
 MERGED_OUT = SNAPSHOT / f"base_set.gemini-2.5-flash+{SAFE_JUDGE_MODEL}.jsonl"
+DEPRECATION_MESSAGE = (
+    "deprecated: baseset/backfill-1.0-judgements.py still targets pre-refactor paths. "
+    "Use `mamba run -n shisa-jp-tl-bench python baseset/prepare_v1_0.py --auto-judge` "
+    "or `mamba run -n shisa-jp-tl-bench python baseset/generate_set.py --snapshot-dir <dir> --auto-judge` instead."
+)
 
 
 def run_translation_comparer(missing_count: int) -> None:
@@ -53,6 +58,7 @@ def run_translation_comparer(missing_count: int) -> None:
 
 
 def main() -> None:
+    raise SystemExit(DEPRECATION_MESSAGE)
     print("=== Stage 1: scan for missing/invalid answers ===")
     if not PAIR_FILE.exists():
         raise SystemExit(f"Missing pair file: {PAIR_FILE}")

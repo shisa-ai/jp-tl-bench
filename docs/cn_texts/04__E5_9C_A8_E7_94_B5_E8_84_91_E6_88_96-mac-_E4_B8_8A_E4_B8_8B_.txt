@@ -1,0 +1,36 @@
+标题：在电脑或 Mac 上下载、安装或重新安装 Microsoft 365 或 Office 2024 - Microsoft 支持
+原始链接：https://support.microsoft.com/zh-cn/office/%E5%9C%A8%E7%94%B5%E8%84%91%E6%88%96-mac-%E4%B8%8A%E4%B8%8B%E8%BD%BD-%E5%AE%89%E8%A3%85%E6%88%96%E9%87%8D%E6%96%B0%E5%AE%89%E8%A3%85-microsoft-365-%E6%88%96-office-2024-4414eaaf-0478-48be-9c42-23adc4716658
+规范化链接：https://support.microsoft.com/zh-cn/office/%E5%9C%A8%E7%94%B5%E8%84%91%E6%88%96-mac-%E4%B8%8A%E4%B8%8B%E8%BD%BD-%E5%AE%89%E8%A3%85%E6%88%96%E9%87%8D%E6%96%B0%E5%AE%89%E8%A3%85-microsoft-365-%E6%88%96-office-2024-4414eaaf-0478-48be-9c42-23adc4716658
+最终链接：https://support.microsoft.com/zh-cn/office/%E5%9C%A8%E7%94%B5%E8%84%91%E6%88%96-mac-%E4%B8%8A%E4%B8%8B%E8%BD%BD-%E5%AE%89%E8%A3%85%E6%88%96%E9%87%8D%E6%96%B0%E5%AE%89%E8%A3%85-microsoft-365-%E6%88%96-office-2024-4414eaaf-0478-48be-9c42-23adc4716658
+HTTP状态：200
+提取方式：manual reconstruction from source article (cleaned support excerpt)
+
+准备好安装 Microsoft 365 或 Office 2024 了吗？
+
+在开始之前，请确保电脑或 Mac 满足系统要求。如果你已经兑换过产品密钥、正在重新安装应用，或者已经通过工作或学校获得了许可证，那么可以直接跳到登录部分，下载并安装 Microsoft 365 或 Office。
+
+如果这是你第一次安装 Microsoft 365 或 Office，则可能需要先完成一组预安装步骤。你执行的操作取决于你的 Microsoft 365 或 Office 副本是家庭版还是商业版，以及你是否拥有仍需要兑换的产品密钥、已与产品关联的帐户，或预分配的许可证。
+
+Microsoft 365 或 Office 家庭版
+
+如果你拥有家庭版产品，并且它附带了产品密钥，那么在首次安装之前，需要先兑换产品密钥。
+
+转到 microsoft365.com/setup，使用现有或新的 Microsoft 帐户登录，然后输入产品密钥进行兑换。兑换密钥会将 Microsoft 365 或 Office 许可证添加到该 Microsoft 帐户中，并且每个产品密钥只需执行此操作一次。如果你要续订附带新产品密钥的 Microsoft 365 订阅，请使用先前与已过期版本订阅关联的同一 Microsoft 帐户。
+
+完成此操作后，每当需要安装或重新安装 Microsoft 365 或 Office 时，都可以直接转到登录部分下载并安装应用。请务必使用用于在 office.com/setup 上兑换产品密钥的同一 Microsoft 帐户登录。
+
+Microsoft 365 商业版
+
+如果企业订阅计划包含桌面版 Microsoft 365 应用，那么只有在组织中有人向你分配了许可证之后，你才会看到安装选项。验证自己拥有许可证后，无论何时需要安装或重新安装 Microsoft 365，都可以直接转到下一部分登录下载 Office，然后选择相应的选项卡查看在 PC 或 Mac 上安装的步骤。你需要使用这些版本的 Microsoft 365 对应的工作或学校帐户进行登录。
+
+如果没有产品密钥或帐户
+
+某些版本的 Microsoft 365，例如 Office Professional Plus、Office Standard，或者独立应用如 Word 或 Project，并不与个人 Microsoft 帐户、工作或学校帐户关联。这些版本的安装方式取决于你的获取渠道，例如工作场所折扣计划、批量许可版本或第三方卖家。
+
+登录以在电脑上下载 Microsoft 365 或 Office 2024
+
+1. 转到 m365.cloud.microsoft/apps；如果你使用的是由世纪互联运营的 Office 365，则转到 login.partner.microsoftonline.cn。如果尚未登录，请先选择“登录”。
+2. 使用与此 Microsoft 365 版本相关联的帐户登录。此帐户可以是 Microsoft 帐户，也可以是工作或学校帐户。
+3. 登录后，按帐户类型选择相应步骤：
+   使用 Microsoft 帐户时，从“Microsoft 365 应用”页中选择“安装应用”，然后根据版本选择安装选项。
+   使用工作或学校帐户时，在主页中选择“安装应用”；某些界面中可能需要先从左侧导航中选择“应用”，再选择“安装应用”。

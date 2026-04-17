@@ -16,7 +16,6 @@ Unlike prepare_v1_0.py, this script does not copy or sync translation dumps for 
 it expects the snapshot directory to already be populated.
 """
 
-import hashlib
 import json
 import os
 import re
@@ -35,24 +34,104 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from choix_analyzer import LLMRanker, load_comparisons_from_file  # type: ignore  # noqa: E402
+from baseset.legacy_boundary import (
+    is_legacy_jp_v1_snapshot,
+    legacy_candidate_paths,
+    schema_v2_path,
+    write_snapshot_report_sidecar,
+    write_legacy_jp_v1_boundary_metadata,
+)
+from benchmark_tasks import load_task_config
+from pair_contract import (
+    PAIR_ID_SCHEMA_V1,
+    compute_pair_fingerprint,
+    compute_pair_id_v1,
+)
+
+from choix_analyzer import (  # type: ignore  # noqa: E402
+    LLMRanker,
+    build_ranked_slice_rows,
+    iter_score_slice_specs,
+    load_comparisons_from_file,
+)
+
+
+TASK_IDENTITY_FIELDS = (
+    "item_id",
+    "name",
+    "task_id",
+    "task_type",
+    "task_version",
+    "source_text",
+    "difficulty",
+    "source_language",
+    "target_language",
+    "english",
+)
+TASK_SLICE_TAG_FIELDS = ("category", "tags", "slice_tags")
 
 
 def safe_name(model: str) -> str:
     return model.replace("/", "__")
 
 
-def load_manifest(path: Path) -> List[dict]:
+def load_manifest_document(path: Path) -> dict:
     with path.open(encoding="utf-8") as handle:
         data = json.load(handle)
     if "models" not in data:
         raise click.ClickException(f"Manifest missing 'models' list: {path}")
-    return data["models"]
+    return data
+
+
+def load_manifest(path: Path) -> List[dict]:
+    return load_manifest_document(path)["models"]
+
+
+def ensure_manifest_metadata(path: Path, manifest_payload: dict, snapshot_dir: Path, task_config) -> dict:
+    if is_legacy_jp_v1_snapshot(snapshot_dir):
+        return manifest_payload
+    expected = {
+        "snapshot_version": snapshot_dir.name,
+        "task_id": task_config.task_id,
+        "task_type": task_config.task_type,
+        "task_version": task_config.task_version,
+        "task_config_digest": task_config.task_config_digest,
+        "dataset_repo": task_config.dataset.repo,
+        "dataset_config": task_config.dataset.config,
+        "dataset_split": task_config.dataset.split,
+        "dataset_revision": task_config.dataset.revision,
+    }
+    updated = dict(manifest_payload)
+    changed = False
+    for key, value in expected.items():
+        existing = updated.get(key)
+        if existing is not None and existing != value:
+            raise click.ClickException(
+                f"Manifest metadata mismatch for {key}: expected {value!r}, found {existing!r} in {path}"
+            )
+        if existing is None:
+            updated[key] = value
+            changed = True
+    if changed:
+        path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+    return updated
 
 
 def load_jsonl(path: Path) -> List[dict]:
     with path.open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle]
+
+
+def record_match_key(item: dict) -> str:
+    return item.get("item_id") or item.get("name")
+
+
+def task_slice_metadata(item: dict) -> dict:
+    metadata = {}
+    for key in TASK_SLICE_TAG_FIELDS:
+        if key in item:
+            metadata[key] = item[key]
+    return metadata
 
 
 def format_translation_pair(conv_a: dict, conv_b: dict) -> str:
@@ -71,8 +150,8 @@ def format_translation_pair(conv_a: dict, conv_b: dict) -> str:
 def ensure_alignment(convs_a: List[dict], convs_b: List[dict], file_a: str, file_b: str) -> Iterable[Tuple[dict, dict]]:
     if len(convs_a) != len(convs_b):
         raise ValueError(f"File length mismatch: {file_a} ({len(convs_a)}) vs {file_b} ({len(convs_b)})")
-    dict_a = {item["name"]: item for item in convs_a}
-    dict_b = {item["name"]: item for item in convs_b}
+    dict_a = {record_match_key(item): item for item in convs_a}
+    dict_b = {record_match_key(item): item for item in convs_b}
     names_a, names_b = set(dict_a), set(dict_b)
     if names_a != names_b:
         missing_in_a = sorted(names_b - names_a)
@@ -86,43 +165,74 @@ def ensure_alignment(convs_a: List[dict], convs_b: List[dict], file_a: str, file
         yield dict_a[name], dict_b[name]
 
 
+def validate_task_identity_fields(conv_a: dict, conv_b: dict, file_a: str, file_b: str) -> None:
+    candidate_fields = list(TASK_IDENTITY_FIELDS)
+    candidate_fields.extend(key for key in TASK_SLICE_TAG_FIELDS if key in conv_a or key in conv_b)
+    for key in candidate_fields:
+        if conv_a.get(key) != conv_b.get(key):
+            raise ValueError(
+                f"Task-defining field mismatch for '{conv_a.get('item_id') or conv_a.get('name')}' "
+                f"between {file_a} and {file_b}: {key}={conv_a.get(key)!r} vs {conv_b.get(key)!r}"
+            )
+
+
 def write_pair_settings(file_a: str, file_b: str, example_name: str) -> Dict[str, str]:
     return {
-        "id": hashlib.md5(f"{file_a}_{file_b}_{example_name}".encode()).hexdigest(),
+        "id": compute_pair_id_v1(file_a, file_b, example_name),
+        "pair_id_schema": PAIR_ID_SCHEMA_V1,
         "llm_a": file_a,
         "llm_b": file_b,
     }
 
 
-def generate_pairs(translation_dir: Path, snapshot_dir: Path, models: List[dict], pair_filename: str) -> Path:
+def generate_pairs(translation_dir: Path, snapshot_dir: Path, models: List[dict], pair_filename: str, task=None) -> Path:
     artifact_dir = snapshot_dir
     artifact_dir.mkdir(parents=True, exist_ok=True)
     pair_path = artifact_dir / pair_filename
+    if is_legacy_jp_v1_snapshot(snapshot_dir) and pair_path.exists():
+        click.echo(f"  - Reusing frozen legacy pair file at {pair_path}")
+        return pair_path
+    if is_legacy_jp_v1_snapshot(snapshot_dir):
+        pair_path = schema_v2_path(pair_path)
 
     click.echo("\n[2/4] Generating pairwise comparison file")
+    task_config = load_task_config(task)
+    snapshot_version = snapshot_dir.name
     safe_names = sorted([safe_name(entry["model"]) for entry in models])
     translations: Dict[str, List[dict]] = {}
     for safe in safe_names:
         src = translation_dir / f"{safe}.jsonl"
         if not src.exists():
             raise click.ClickException(f"Missing translation dump for {safe}: {src}")
-        translations[safe] = load_jsonl(src)
+        translations[safe] = [task_config.normalize_record(item) for item in load_jsonl(src)]
 
     total_pairs = 0
     with pair_path.open("w", encoding="utf-8") as handle:
         for idx, safe_a in enumerate(safe_names):
             for safe_b in safe_names[idx + 1 :]:
                 for conv_a, conv_b in ensure_alignment(translations[safe_a], translations[safe_b], safe_a, safe_b):
+                    validate_task_identity_fields(conv_a, conv_b, safe_a, safe_b)
                     settings = write_pair_settings(safe_a, safe_b, conv_a["name"])
                     payload = {
                         "id": settings["id"],
+                        "pair_id_schema": settings["pair_id_schema"],
                         "llm_a": settings["llm_a"],
                         "llm_b": settings["llm_b"],
                         "formatted_data": format_translation_pair(conv_a, conv_b),
+                        "item_id": conv_a["item_id"],
                         "name": conv_a["name"],
-                        "english": conv_a["english"],
+                        "task_id": conv_a["task_id"],
+                        "task_type": conv_a["task_type"],
+                        "task_version": conv_a["task_version"],
+                        "snapshot_version": snapshot_version,
+                        "source_language": conv_a["source_language"],
+                        "target_language": conv_a["target_language"],
                         "difficulty": conv_a["difficulty"],
                     }
+                    if "english" in conv_a:
+                        payload["english"] = conv_a["english"]
+                    payload.update(task_slice_metadata(conv_a))
+                    payload["pair_fingerprint"] = compute_pair_fingerprint(payload)
                     handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
                     total_pairs += 1
     click.echo(f"  - Wrote {total_pairs:,} rows to {pair_path}")
@@ -132,6 +242,8 @@ def generate_pairs(translation_dir: Path, snapshot_dir: Path, models: List[dict]
 def summarize_pairs(pair_file: Path, report_dir: Path, manifest_models: Dict[str, str]) -> Path:
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "pair_coverage.json"
+    if is_legacy_jp_v1_snapshot(report_dir.parent) and report_path.exists():
+        report_path = schema_v2_path(report_path)
     stats = {safe: {"matches": 0, "opponents": set()} for safe in manifest_models}
     with pair_file.open(encoding="utf-8") as handle:
         for line in handle:
@@ -182,15 +294,11 @@ def resolve_analysis_file(explicit: str, snapshot_dir: Path, judge_model: str) -
         return None
 
     safe_judge = safe_name(judge_model)
-    preferred = [
-        snapshot_dir / f"base_set.{safe_judge}.jsonl",
-        REPO_ROOT / "base_sets" / f"base_set.{safe_judge}.jsonl",
-    ]
+    preferred = legacy_candidate_paths(snapshot_dir / f"base_set.{safe_judge}.jsonl", snapshot_dir)
     for path in preferred:
         if path.exists():
             return path
-    candidates = sorted((REPO_ROOT / "base_sets").glob("base_set.*.jsonl"))
-    return candidates[0].resolve() if candidates else None
+    return None
 
 
 def collect_present_models(analysis_file: Optional[Path]) -> set:
@@ -283,7 +391,9 @@ def collect_pair_ids(pair_file: Path) -> set:
 def run_auto_judge(
     pair_file: Path,
     snapshot_dir: Path,
+    task: str | None,
     judge_model: str,
+    judge_profile: str,
     base_url: str,
     api_key_env: str,
     max_workers: int,
@@ -292,18 +402,13 @@ def run_auto_judge(
     use_gemini: bool = False,
 ) -> Path:
     click.echo("\n[3b] Running translation comparer to fill missing judges")
-    repo_pairs = REPO_ROOT / "base_conversation_pairs.jsonl"
-    backup = None
-    if repo_pairs.exists():
-        backup = repo_pairs.with_suffix(".setgen.bak")
-        shutil.move(repo_pairs, backup)
-    shutil.copy2(pair_file, repo_pairs)
-
     skip_ids_file = None
     try:
         cmd = [
             sys.executable,
             "translation_comparer_any_model.py",
+            "--judge-profile",
+            judge_profile,
             "--base-url",
             base_url,
             "--judge-model",
@@ -315,7 +420,11 @@ def run_auto_judge(
             str(concurrency_limit),
             "--api-key-env",
             api_key_env,
+            "--pairs-file",
+            str(pair_file),
         ]
+        if task:
+            cmd[2:2] = ["--task", task]
         if use_gemini:
             cmd.append("--gemini-judge")
         if skip_ids:
@@ -327,55 +436,27 @@ def run_auto_judge(
             cmd.extend(["--skip-ids-file", skip_ids_file.name])
             click.echo(f"  - Writing {len(skip_ids):,} skip IDs to temp file: {skip_ids_file.name}")
         click.echo(f"  - Executing: {' '.join(cmd)}")
-        subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+        env = os.environ.copy()
+        env["BASESET_SNAPSHOT_DIR"] = str(snapshot_dir)
+        subprocess.run(cmd, cwd=REPO_ROOT, check=True, env=env)
     finally:
-        repo_pairs.unlink(missing_ok=True)
-        if backup:
-            shutil.move(backup, repo_pairs)
         if skip_ids_file and os.path.exists(skip_ids_file.name):
             os.unlink(skip_ids_file.name)
 
     safe_judge = safe_name(judge_model)
-    base_file = REPO_ROOT / "base_sets" / f"base_set.{safe_judge}.jsonl"
-    if not base_file.exists():
-        raise click.ClickException(f"translation comparer finished but {base_file} was not created.")
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    dest = snapshot_dir / base_file.name
-    shutil.copy2(base_file, dest)
-    click.echo(f"  - Copied {base_file.relative_to(REPO_ROOT)} -> {dest.relative_to(REPO_ROOT)}")
-    return dest
-
-
-def build_rows(
-    ranker: LLMRanker,
-    manifest_models: Dict[str, str],
-    difficulty: str = "all",
-    language: Optional[str] = None,
-) -> List[dict]:
-    try:
-        rankings = ranker.get_rankings(difficulty, language)
-    except ValueError:
-        return []
-    rows = []
-    for _, row in rankings.iterrows():
-        safe = row["llm"]
-        matches = int(row["total_matches"])
-        wins = int(row["wins"])
-        rows.append(
-            {
-                "model": manifest_models.get(safe, safe.replace("__", "/")),
-                "safe_name": safe,
-                "score": row["score"],
-                "wins": wins,
-                "matches": matches,
-                "win_rate": wins / matches * 100 if matches else 0.0,
-                "EN": row["EN"],
-                "LT": row["LT"],
-                "difficulty": difficulty,
-                "language": language or "all",
-            }
-        )
-    return rows
+    candidate_sources = legacy_candidate_paths(snapshot_dir / f"base_set.{safe_judge}.jsonl", snapshot_dir)
+    for source in candidate_sources:
+        if not source.exists():
+            continue
+        try:
+            relative_source = source.relative_to(REPO_ROOT)
+        except ValueError:
+            relative_source = source
+        click.echo(f"  - Using judged base set at {relative_source}")
+        return source
+    raise click.ClickException(
+        "translation comparer finished but no judged base_set artifact was created in the snapshot."
+    )
 
 
 def print_table(rows: List[dict], title: str) -> None:
@@ -396,14 +477,19 @@ def print_table(rows: List[dict], title: str) -> None:
 
 def analyze_wins(
     analysis_file: Path,
+    snapshot_dir: Path,
     report_dir: Path,
     manifest_models: Dict[str, str],
+    manifest_payload: dict,
+    judge_model: str,
+    pair_file: Path,
     missing_models: Optional[List[str]] = None,
+    task=None,
 ) -> Path:
-    comparisons = load_comparisons_from_file(str(analysis_file))
+    comparisons = load_comparisons_from_file(str(analysis_file), task=task)
     filtered = [
-        (a, b, winner, difficulty, is_english)
-        for (a, b, winner, difficulty, is_english) in comparisons
+        (a, b, winner, difficulty, direction_key)
+        for (a, b, winner, difficulty, direction_key) in comparisons
         if a in manifest_models and b in manifest_models
     ]
     if missing_models is None:
@@ -417,27 +503,39 @@ def analyze_wins(
         click.echo("  - No judged comparisons found for manifest models; skipping scoring.", err=True)
         return report_dir / f"{analysis_file.stem}_scores.json"
 
-    ranker = LLMRanker()
+    ranker = LLMRanker(task=task)
     ranker.fit(filtered)
     click.echo("\n[4/4] Bradley–Terry scores")
-    slice_rows: List[dict] = []
-    overall_rows = build_rows(ranker, manifest_models, "all", None)
-    print_table(overall_rows, "Overall (all directions)")
-    slice_rows.extend({"slice": "overall", **row} for row in overall_rows)
-
-    en_rows = build_rows(ranker, manifest_models, "all", "english")
-    print_table(en_rows, "EN→JA (judge saw english inputs)")
-    slice_rows.extend({"slice": "en_ja", **row} for row in en_rows)
-
-    ja_rows = build_rows(ranker, manifest_models, "all", "japanese")
-    print_table(ja_rows, "JA→EN (judge saw japanese inputs)")
-    slice_rows.extend({"slice": "ja_en", **row} for row in ja_rows)
+    slice_rows = build_ranked_slice_rows(ranker, manifest_models=manifest_models, task=task)
+    for spec in iter_score_slice_specs(task=task):
+        rows = [row for row in slice_rows if row["slice"] == spec["slice"]]
+        if rows:
+            print_table(rows, spec["title"])
 
     report_dir.mkdir(parents=True, exist_ok=True)
     scores_path = report_dir / f"{analysis_file.stem}_scores.json"
+    if is_legacy_jp_v1_snapshot(snapshot_dir):
+        legacy_stem = analysis_file.stem.replace(".schema-v2", "")
+        legacy_scores_path = report_dir / f"{legacy_stem}_scores.json"
+        if legacy_scores_path.exists():
+            scores_path = schema_v2_path(legacy_scores_path)
     with scores_path.open("w", encoding="utf-8") as handle:
         json.dump(slice_rows, handle, indent=2)
+    task_config = load_task_config(task)
+    sidecar_path = write_snapshot_report_sidecar(
+        scores_path,
+        snapshot_dir=snapshot_dir,
+        manifest_payload={
+            **manifest_payload,
+            "manifest_file": "manifest.json",
+        },
+        task_config=task_config,
+        judge_model=judge_model,
+        pair_file=pair_file,
+        analysis_file=analysis_file,
+    )
     click.echo(f"  - Saved table to {scores_path}")
+    click.echo(f"  - Saved report metadata to {sidecar_path}")
     return scores_path
 
 
@@ -459,10 +557,18 @@ def analyze_wins(
     show_default=True,
     help="Filename for the generated pair file inside the snapshot directory.",
 )
+@click.option("--task", envvar="TASK_CONFIG", help="Task config path or name under benchmark_tasks/.")
+@click.option(
+    "--judge-profile",
+    envvar="JUDGE_PROFILE",
+    default="default",
+    show_default=True,
+    help="Judge profile path or name under judge_profiles/. Forwarded to the auto-judge comparer.",
+)
 @click.option(
     "--analysis-file",
     default="",
-    help="Optional explicit path to a judged base_set JSONL. Defaults to <snapshot-dir>/base_set.<judge>.jsonl or base_sets/.",
+    help="Optional explicit path to a judged base_set JSONL. Defaults to <snapshot-dir>/base_set.<judge>.jsonl.",
 )
 @click.option(
     "--judge-model",
@@ -512,6 +618,8 @@ def main(
     snapshot_dir: str,
     manifest: str,
     pair_filename: str,
+    task: str,
+    judge_profile: str,
     analysis_file: str,
     judge_model: str,
     judge_base_url: str,
@@ -545,11 +653,21 @@ def main(
         raise click.ClickException(f"Manifest not found: {manifest_path}")
 
     click.echo(f"Loading manifest from {manifest_path}")
-    entries = load_manifest(manifest_path)
+    task_config = load_task_config(task)
+    manifest_payload = ensure_manifest_metadata(
+        manifest_path,
+        load_manifest_document(manifest_path),
+        snapshot_path,
+        task_config,
+    )
+    entries = manifest_payload["models"]
     manifest_models = {safe_name(entry["model"]): entry["model"] for entry in entries}
 
-    pair_file = generate_pairs(translation_dir, snapshot_path, entries, pair_filename)
+    pair_file = generate_pairs(translation_dir, snapshot_path, entries, pair_filename, task=task)
     summarize_pairs(pair_file, report_dir, manifest_models)
+    if is_legacy_jp_v1_snapshot(snapshot_path):
+        boundary_path = write_legacy_jp_v1_boundary_metadata(snapshot_path, judge_model)
+        click.echo(f"  - Saved legacy boundary metadata to {boundary_path}")
 
     analysis_path = resolve_analysis_file(analysis_file, snapshot_path, judge_model)
     explicit_analysis = bool(analysis_file)
@@ -605,7 +723,9 @@ def main(
         analysis_path = run_auto_judge(
             pair_file,
             snapshot_path,
+            task,
             judge_model,
+            judge_profile,
             judge_base_url,
             judge_api_key_env,
             max_workers,
@@ -646,7 +766,17 @@ def main(
 
     if analysis_path and analysis_path.exists():
         click.echo(f"\nScoring judged comparisons from {analysis_path}")
-        analyze_wins(analysis_path, report_dir, manifest_models, missing)
+        analyze_wins(
+            analysis_path,
+            snapshot_path,
+            report_dir,
+            manifest_models,
+            manifest_payload,
+            judge_model,
+            pair_file,
+            missing,
+            task=task,
+        )
     else:
         click.echo("\nNo judged base_set file found. Run translation_comparer_any_model.py --generate-base-set first.")
 

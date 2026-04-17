@@ -11,7 +11,6 @@ Pipeline:
 The script never overwrites repo-level files outside baseset/v1.0/.
 """
 
-import hashlib
 import json
 import os
 import re
@@ -34,7 +33,25 @@ REPORT_DIR = SNAPSHOT_DIR / "reports"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from choix_analyzer import LLMRanker, load_comparisons_from_file  # type: ignore  # noqa: E402
+from baseset.legacy_boundary import (
+    legacy_candidate_paths,
+    schema_v2_path,
+    write_snapshot_report_sidecar,
+    write_legacy_jp_v1_boundary_metadata,
+)
+from benchmark_tasks import load_task_config
+from pair_contract import (
+    PAIR_ID_SCHEMA_V1,
+    compute_pair_fingerprint,
+    compute_pair_id_v1,
+)
+
+from choix_analyzer import (  # type: ignore  # noqa: E402
+    LLMRanker,
+    build_ranked_slice_rows,
+    iter_score_slice_specs,
+    load_comparisons_from_file,
+)
 
 
 def safe_name(model: str) -> str:
@@ -63,6 +80,10 @@ def copy_translations(entries: List[dict]) -> List[str]:
         dest_path = (TRANSLATION_DIR / f"{safe_name(model)}.jsonl").resolve()
         if not src_path.exists():
             click.echo(f"  - MISSING {model}: {src_path}", err=True)
+            continue
+        if dest_path.exists():
+            copied.append(dest_path)
+            click.echo(f"  - Reusing frozen snapshot copy for {model}: baseset/v1.0/translations/{dest_path.name}")
             continue
         shutil.copy2(src_path, dest_path)
         copied.append(dest_path)
@@ -110,7 +131,8 @@ def ensure_alignment(convs_a: List[dict], convs_b: List[dict], file_a: str, file
 
 def write_pair_settings(file_a: str, file_b: str, example_name: str) -> Dict[str, str]:
     return {
-        "id": hashlib.md5(f"{file_a}_{file_b}_{example_name}".encode()).hexdigest(),
+        "id": compute_pair_id_v1(file_a, file_b, example_name),
+        "pair_id_schema": PAIR_ID_SCHEMA_V1,
         "llm_a": file_a,
         "llm_b": file_b,
     }
@@ -119,6 +141,10 @@ def write_pair_settings(file_a: str, file_b: str, example_name: str) -> Dict[str
 def generate_pairs(outputs: List[str]) -> Path:
     ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     pair_path = ARTIFACT_DIR / "base_conversation_pairs.v1.0.jsonl"
+    if pair_path.exists():
+        click.echo(f"  - Reusing frozen legacy pair file at {pair_path}")
+        return pair_path
+    pair_path = schema_v2_path(pair_path)
     click.echo("\n[2/4] Generating pairwise comparison file")
     safe_names = sorted([Path(name).stem for name in outputs])
     translations = {safe: load_jsonl(TRANSLATION_DIR / f"{safe}.jsonl") for safe in safe_names}
@@ -130,6 +156,7 @@ def generate_pairs(outputs: List[str]) -> Path:
                     settings = write_pair_settings(safe_a, safe_b, conv_a["name"])
                     payload = {
                         "id": settings["id"],
+                        "pair_id_schema": settings["pair_id_schema"],
                         "llm_a": settings["llm_a"],
                         "llm_b": settings["llm_b"],
                         "formatted_data": format_translation_pair(conv_a, conv_b),
@@ -137,6 +164,7 @@ def generate_pairs(outputs: List[str]) -> Path:
                         "english": conv_a["english"],
                         "difficulty": conv_a["difficulty"],
                     }
+                    payload["pair_fingerprint"] = compute_pair_fingerprint(payload)
                     handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
                     total_pairs += 1
     click.echo(f"  - Wrote {total_pairs:,} rows to {pair_path}")
@@ -146,6 +174,8 @@ def generate_pairs(outputs: List[str]) -> Path:
 def summarize_pairs(pair_file: Path, manifest_models: Dict[str, str]) -> Path:
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report_path = REPORT_DIR / "pair_coverage.json"
+    if report_path.exists():
+        report_path = schema_v2_path(report_path)
     stats = {safe: {"matches": 0, "opponents": set()} for safe in manifest_models}
     with pair_file.open(encoding="utf-8") as handle:
         for line in handle:
@@ -188,15 +218,11 @@ def resolve_analysis_file(explicit: str, judge_model: str) -> Optional[Path]:
         return candidate.resolve()
 
     safe_judge = safe_name(judge_model)
-    preferred = [
-        ARTIFACT_DIR / f"base_set.{safe_judge}.jsonl",
-        REPO_ROOT / "base_sets" / f"base_set.{safe_judge}.jsonl",
-    ]
+    preferred = legacy_candidate_paths(ARTIFACT_DIR / f"base_set.{safe_judge}.jsonl", SNAPSHOT_DIR)
     for path in preferred:
         if path.exists():
             return path
-    candidates = sorted((REPO_ROOT / "base_sets").glob("base_set.*.jsonl"))
-    return candidates[0].resolve() if candidates else None
+    return None
 
 
 def collect_present_models(analysis_file: Optional[Path]) -> set:
@@ -242,12 +268,6 @@ def run_auto_judge(
     concurrency_limit: int,
 ) -> Path:
     click.echo("\n[3b] Running translation comparer to fill missing judges")
-    repo_pairs = REPO_ROOT / "base_conversation_pairs.jsonl"
-    backup = None
-    if repo_pairs.exists():
-        backup = repo_pairs.with_suffix(".setgen.bak")
-        shutil.move(repo_pairs, backup)
-    shutil.copy2(pair_file, repo_pairs)
     try:
         cmd = [
             sys.executable,
@@ -263,50 +283,30 @@ def run_auto_judge(
             str(concurrency_limit),
             "--api-key-env",
             api_key_env,
+            "--pairs-file",
+            str(pair_file),
         ]
         click.echo(f"  - Executing: {' '.join(cmd)}")
-        subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+        env = os.environ.copy()
+        env["BASESET_SNAPSHOT_DIR"] = str(SNAPSHOT_DIR)
+        subprocess.run(cmd, cwd=REPO_ROOT, check=True, env=env)
     finally:
-        repo_pairs.unlink(missing_ok=True)
-        if backup:
-            shutil.move(backup, repo_pairs)
+        pass
 
     safe_judge = safe_name(judge_model)
-    base_file = REPO_ROOT / "base_sets" / f"base_set.{safe_judge}.jsonl"
-    if not base_file.exists():
-        raise click.ClickException(f"translation comparer finished but {base_file} was not created.")
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    dest = ARTIFACT_DIR / base_file.name
-    shutil.copy2(base_file, dest)
-    click.echo(f"  - Copied {base_file.relative_to(REPO_ROOT)} -> {dest.relative_to(BASESET_DIR)}")
-    return dest
-
-
-def build_rows(ranker: LLMRanker, manifest_models: Dict[str, str], difficulty: str = "all", language: Optional[str] = None) -> List[dict]:
-    try:
-        rankings = ranker.get_rankings(difficulty, language)
-    except ValueError:
-        return []
-    rows = []
-    for _, row in rankings.iterrows():
-        safe = row["llm"]
-        matches = int(row["total_matches"])
-        wins = int(row["wins"])
-        rows.append(
-            {
-                "model": manifest_models.get(safe, safe.replace("__", "/")),
-                "safe_name": safe,
-                "score": row["score"],
-                "wins": wins,
-                "matches": matches,
-                "win_rate": wins / matches * 100 if matches else 0.0,
-                "EN": row["EN"],
-                "LT": row["LT"],
-                "difficulty": difficulty,
-                "language": language or "all",
-            }
-        )
-    return rows
+    candidate_sources = legacy_candidate_paths(ARTIFACT_DIR / f"base_set.{safe_judge}.jsonl", SNAPSHOT_DIR)
+    for source in candidate_sources:
+        if not source.exists():
+            continue
+        try:
+            relative_source = source.relative_to(REPO_ROOT)
+        except ValueError:
+            relative_source = source
+        click.echo(f"  - Using judged base set at {relative_source}")
+        return source
+    raise click.ClickException(
+        "translation comparer finished but no judged base_set artifact was created in the snapshot."
+    )
 
 
 def print_table(rows: List[dict], title: str) -> None:
@@ -325,11 +325,18 @@ def print_table(rows: List[dict], title: str) -> None:
         )
 
 
-def analyze_wins(analysis_file: Path, manifest_models: Dict[str, str], missing_models: Optional[List[str]] = None) -> None:
-    comparisons = load_comparisons_from_file(str(analysis_file))
+def analyze_wins(
+    analysis_file: Path,
+    manifest_models: Dict[str, str],
+    judge_model: str,
+    pair_file: Path,
+    missing_models: Optional[List[str]] = None,
+    task=None,
+) -> None:
+    comparisons = load_comparisons_from_file(str(analysis_file), task=task)
     filtered = [
-        (a, b, winner, difficulty, is_english)
-        for (a, b, winner, difficulty, is_english) in comparisons
+        (a, b, winner, difficulty, direction_key)
+        for (a, b, winner, difficulty, direction_key) in comparisons
         if a in manifest_models and b in manifest_models
     ]
     if missing_models is None:
@@ -348,51 +355,46 @@ def analyze_wins(analysis_file: Path, manifest_models: Dict[str, str], missing_m
         click.echo("  - No judged comparisons found for manifest models; skipping scoring.", err=True)
         return
 
-    ranker = LLMRanker()
+    ranker = LLMRanker(task=task)
     ranker.fit(filtered)
     click.echo("\n[4/4] Bradley–Terry scores")
-    slice_rows = []
-
-    # Overall across all difficulties and languages
-    overall_rows = build_rows(ranker, manifest_models, "all", None)
-    print_table(overall_rows, "Overall (all directions)")
-    slice_rows.extend({"slice": "overall", **row} for row in overall_rows)
-
-    # EN→JA overall, easy, hard
-    en_rows = build_rows(ranker, manifest_models, "all", "english")
-    print_table(en_rows, "EN→JA (judge saw english inputs)")
-    slice_rows.extend({"slice": "en_ja", **row} for row in en_rows)
-
-    en_easy_rows = build_rows(ranker, manifest_models, "easy", "english")
-    if en_easy_rows:
-        print_table(en_easy_rows, "EN→JA Easy")
-        slice_rows.extend({"slice": "en_ja_easy", **row} for row in en_easy_rows)
-
-    en_hard_rows = build_rows(ranker, manifest_models, "hard", "english")
-    if en_hard_rows:
-        print_table(en_hard_rows, "EN→JA Hard")
-        slice_rows.extend({"slice": "en_ja_hard", **row} for row in en_hard_rows)
-
-    # JA→EN overall, easy, hard
-    ja_rows = build_rows(ranker, manifest_models, "all", "japanese")
-    print_table(ja_rows, "JA→EN (judge saw japanese inputs)")
-    slice_rows.extend({"slice": "ja_en", **row} for row in ja_rows)
-
-    ja_easy_rows = build_rows(ranker, manifest_models, "easy", "japanese")
-    if ja_easy_rows:
-        print_table(ja_easy_rows, "JA→EN Easy")
-        slice_rows.extend({"slice": "ja_en_easy", **row} for row in ja_easy_rows)
-
-    ja_hard_rows = build_rows(ranker, manifest_models, "hard", "japanese")
-    if ja_hard_rows:
-        print_table(ja_hard_rows, "JA→EN Hard")
-        slice_rows.extend({"slice": "ja_en_hard", **row} for row in ja_hard_rows)
+    slice_rows = build_ranked_slice_rows(ranker, manifest_models=manifest_models, task=task)
+    for spec in iter_score_slice_specs(task=task):
+        rows = [row for row in slice_rows if row["slice"] == spec["slice"]]
+        if rows:
+            print_table(rows, spec["title"])
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     scores_path = REPORT_DIR / f"{analysis_file.stem}_scores.json"
+    legacy_stem = analysis_file.stem.replace(".schema-v2", "")
+    legacy_scores_path = REPORT_DIR / f"{legacy_stem}_scores.json"
+    if legacy_scores_path.exists():
+        scores_path = schema_v2_path(legacy_scores_path)
     with scores_path.open("w", encoding="utf-8") as handle:
         json.dump(slice_rows, handle, indent=2)
+    task_config = load_task_config(task)
+    sidecar_path = write_snapshot_report_sidecar(
+        scores_path,
+        snapshot_dir=SNAPSHOT_DIR,
+        manifest_payload={
+            "snapshot_version": SNAPSHOT_DIR.name,
+            "task_id": task_config.task_id,
+            "task_type": task_config.task_type,
+            "task_version": task_config.task_version,
+            "task_config_digest": task_config.task_config_digest,
+            "dataset_repo": task_config.dataset.repo,
+            "dataset_config": task_config.dataset.config,
+            "dataset_split": task_config.dataset.split,
+            "dataset_revision": task_config.dataset.revision,
+            "manifest_file": "manifest.json",
+        },
+        task_config=task_config,
+        judge_model=judge_model,
+        pair_file=pair_file,
+        analysis_file=analysis_file,
+    )
     click.echo(f"  - Saved table to {scores_path}")
+    click.echo(f"  - Saved report metadata to {sidecar_path}")
 
 
 @click.command()
@@ -402,10 +404,11 @@ def analyze_wins(analysis_file: Path, manifest_models: Dict[str, str], missing_m
     show_default=True,
     help="Relative path to the manifest JSON.",
 )
+@click.option("--task", envvar="TASK_CONFIG", help="Task config path or name under benchmark_tasks/.")
 @click.option(
     "--analysis-file",
     default="",
-    help="Optional explicit path to a judged base_set JSONL. Defaults to baseset/v1.0/ or base_sets/.",
+    help="Optional explicit path to a judged base_set JSONL. Defaults to baseset/v1.0/.",
 )
 @click.option(
     "--judge-model",
@@ -436,6 +439,7 @@ def analyze_wins(analysis_file: Path, manifest_models: Dict[str, str], missing_m
 )
 def main(
     manifest: str,
+    task: str,
     analysis_file: str,
     judge_model: str,
     judge_base_url: str,
@@ -457,6 +461,8 @@ def main(
     copied = copy_translations(entries)
     pair_file = generate_pairs(copied)
     summarize_pairs(pair_file, manifest_models)
+    boundary_path = write_legacy_jp_v1_boundary_metadata(SNAPSHOT_DIR, judge_model)
+    click.echo(f"  - Saved legacy boundary metadata to {boundary_path}")
 
     analysis_path = resolve_analysis_file(analysis_file, judge_model)
     present_models = collect_present_models(analysis_path)
@@ -515,11 +521,17 @@ def main(
 
     if analysis_path and analysis_path.exists():
         click.echo(f"\nScoring judged comparisons from {analysis_path}")
-        analyze_wins(analysis_path, manifest_models, missing)
+        analyze_wins(
+            analysis_path,
+            manifest_models,
+            judge_model,
+            pair_file,
+            missing,
+            task=task,
+        )
     else:
         click.echo("\nNo judged base_set file found. Run translation_comparer_any_model.py --generate-base-set first.")
 
 
 if __name__ == "__main__":
     main()
-

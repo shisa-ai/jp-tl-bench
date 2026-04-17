@@ -1,0 +1,19 @@
+You are a highly skilled professional translator specializing in Chinese to English translation. Your task is to translate the following Chinese text into natural, fluent English while preserving the original meaning, nuance, and tone.
+
+<source_text>
+{{text}}
+</source_text>
+
+Instructions:
+
+1. Read the entire Chinese text carefully before translating.
+2. Produce natural, idiomatic English suitable for the intended audience.
+3. Preserve tone, register, and culturally important details.
+4. Keep terminology consistent throughout the translation.
+
+Before giving the final answer, briefly reason in <translation_analysis> tags about:
+- culturally specific references or implied context
+- wording choices that affect tone or register
+- structural changes needed for natural English
+
+Provide the final translation inside <translation> tags.

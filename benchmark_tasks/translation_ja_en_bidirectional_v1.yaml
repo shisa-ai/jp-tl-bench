@@ -1,0 +1,46 @@
+task_id: translation.ja-en
+task_type: translation
+task_version: v1
+language_names:
+  en: English
+  ja: Japanese
+dataset:
+  repo: shisa-ai/bt_translation_set_global
+  config: translation_ja_en_bidirectional_v1
+  split: train
+  revision: 1b0d3bcb2ed1a611ad9130cc474007afae2b598c
+  hf_token_env: HF_TOKEN
+compatibility:
+  name_alias_mode: legacy_passthrough
+  emit_legacy_english: true
+compare_prompt_profile: compare-default-v1
+compare_prompt_profiles:
+  compare-default-v1:
+    prompt_path: prompts/compare/default.txt
+  compare-cn-v1:
+    prompt_path: prompts/compare/cn.txt
+directions:
+  - key: en_ja
+    source_language: en
+    target_language: ja
+    display_name: English to Japanese
+    summary_language_label: english
+    legacy_english: true
+    translation_prompts:
+      default: prompts/translate_prompt_from_english.txt
+      low_context: prompts/translate_prompt_from_english_low_context.txt
+      ultra_low_context: prompts/translate_prompt_from_english_ultra_low_context.txt
+  - key: ja_en
+    source_language: ja
+    target_language: en
+    display_name: Japanese to English
+    summary_language_label: japanese
+    legacy_english: false
+    translation_prompts:
+      default: prompts/translate_prompt_from_japanese.txt
+      low_context: prompts/translate_prompt_from_japanese_low_context.txt
+      ultra_low_context: prompts/translate_prompt_from_japanese_ultra_low_context.txt
+scoring:
+  direction_order:
+    - en_ja
+    - ja_en

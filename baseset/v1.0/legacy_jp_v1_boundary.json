@@ -1,0 +1,12 @@
+{
+  "legacy_boundary": "legacy_jp_v1",
+  "artifact_policy": "additive_only",
+  "pair_id_schema": "v1",
+  "pair_fingerprint_policy": "schema_v2_exports_only",
+  "grandfather_pre_fingerprint_judgments": true,
+  "pair_file": "base_conversation_pairs.v1.0.jsonl",
+  "judgments_file_pattern": "base_set.<judge>.jsonl",
+  "schema_v2_judgments_pattern": "base_set.<judge>.schema-v2.jsonl",
+  "score_report_pattern": "reports/base_set.<judge>_scores.json",
+  "schema_v2_score_report_pattern": "reports/base_set.<judge>_scores.schema-v2.json"
+}

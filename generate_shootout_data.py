@@ -1,19 +1,50 @@
 import os
 import json
 from itertools import combinations
-import hashlib
 from io import StringIO
 import click
+from artifact_paths import preferred_result_file
+from benchmark_tasks import load_judge_profile
+from pair_contract import (
+    PAIR_ID_SCHEMA_V1,
+    compute_pair_fingerprint,
+    compute_pair_id_v1,
+)
+from benchmark_tasks import load_task_config
 
 BASESET_SNAPSHOT_DIR = os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0")
+FAILED_TRANSLATION_PREFIX = "[TRANSLATION FAILED:"
+TASK_IDENTITY_FIELDS = (
+    "item_id",
+    "name",
+    "task_id",
+    "task_type",
+    "task_version",
+    "source_text",
+    "difficulty",
+    "source_language",
+    "target_language",
+    "english",
+)
+TASK_SLICE_TAG_FIELDS = ("category", "tags", "slice_tags")
 
 
-def default_pairs_path(test_model: str, judge_model: str = None) -> str:
-    """Compute per-model pairs path under results/<baseset_version>/<model>/<judge>/pairs.jsonl."""
-    safe_model = test_model.replace("/", "__")
-    safe_judge = (judge_model or "default").replace("/", "__")
+def default_pairs_path(
+    test_model: str,
+    judge_model: str | None = None,
+    judge_profile_id: str = "default",
+) -> str:
+    """Compute per-model pairs path under results/<baseset_version>/<model>/<judge_dir>/pairs.jsonl."""
     base_version = os.path.basename(os.path.normpath(BASESET_SNAPSHOT_DIR))
-    return os.path.join("results", base_version, safe_model, safe_judge, "pairs.jsonl")
+    return str(
+        preferred_result_file(
+            base_version,
+            test_model,
+            judge_model or "default",
+            "pairs.jsonl",
+            judge_profile_id=judge_profile_id,
+        )
+    )
 
 def load_jsonl(file_path):
     data = []
@@ -21,6 +52,21 @@ def load_jsonl(file_path):
         for line in f:
             data.append(json.loads(line))
     return data
+
+
+def validate_translation_record(item, file_label):
+    """Reject unresolved failed generations before they enter pair generation."""
+    status = item.get("status")
+    translation = item.get("translation", "")
+    item_label = item.get("item_id") or item.get("name", "unknown")
+    if status and status != "ok":
+        raise ValueError(
+            f"Cannot generate pairs from failed generation in {file_label} for item {item_label}"
+        )
+    if isinstance(translation, str) and translation.startswith(FAILED_TRANSLATION_PREFIX):
+        raise ValueError(
+            f"Cannot generate pairs from failed generation in {file_label} for item {item_label}"
+        )
 
 def format_translation_pair(conv_a, conv_b):
     """Format a pair of translations into a single markdown document."""
@@ -47,21 +93,60 @@ def format_translation_pair(conv_a, conv_b):
 def write_pair_settings(file_a, file_b, example_name):
     """Format the basic settings for the translation pair."""
     return {
-        "id": hashlib.md5(f"{file_a}_{file_b}_{example_name}".encode()).hexdigest(),
+        "id": compute_pair_id_v1(file_a, file_b, example_name),
+        "pair_id_schema": PAIR_ID_SCHEMA_V1,
         "llm_a": os.path.splitext(file_a)[0],
         "llm_b": os.path.splitext(file_b)[0]
     }
 
-def generate_translation_pairs(test_model_file=None, force=False, output_path=None, judge_model=None):
+def record_match_key(item: dict) -> str:
+    return item.get("item_id") or item.get("name")
+
+
+def task_slice_metadata(item: dict) -> dict:
+    metadata = {}
+    for key in TASK_SLICE_TAG_FIELDS:
+        if key in item:
+            metadata[key] = item[key]
+    return metadata
+
+
+def validate_task_identity_fields(conv_a: dict, conv_b: dict, file_a: str, file_b: str) -> None:
+    candidate_fields = list(TASK_IDENTITY_FIELDS)
+    candidate_fields.extend(
+        key for key in TASK_SLICE_TAG_FIELDS if key in conv_a or key in conv_b
+    )
+    for key in candidate_fields:
+        if conv_a.get(key) != conv_b.get(key):
+            raise ValueError(
+                f"Task-defining field mismatch for '{conv_a.get('item_id') or conv_a.get('name')}' "
+                f"between {file_a} and {file_b}: {key}={conv_a.get(key)!r} vs {conv_b.get(key)!r}"
+            )
+
+
+def generate_translation_pairs(
+    test_model_file=None,
+    force=False,
+    output_path=None,
+    judge_model=None,
+    judge_profile_id: str = "default",
+    task=None,
+):
     """Generate translation pairs comparing target file against all other models."""
+    task_config = load_task_config(task)
     base_translations_dir = os.path.join(BASESET_SNAPSHOT_DIR, "translations")
     translations_dir = "translations"
+    snapshot_version = os.path.basename(os.path.normpath(BASESET_SNAPSHOT_DIR))
     if output_path:
         output_file = output_path
     elif test_model_file:
         # Default per-model location, parallel-safe
         pretty_name = os.path.splitext(test_model_file)[0].replace("__", "/")
-        output_file = default_pairs_path(pretty_name, judge_model)
+        output_file = default_pairs_path(
+            pretty_name,
+            judge_model,
+            judge_profile_id=judge_profile_id,
+        )
     else:
         output_file = "base_conversation_pairs.jsonl"
     
@@ -76,12 +161,12 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
         if not os.path.exists(os.path.join(translations_dir, test_model_file)):
             raise click.BadParameter(f"File {test_model_file} not found in {translations_dir}")
         # Get all files from base_translations to compare against
-        base_files = [f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl')]
+        base_files = sorted(f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl'))
         pairs = [(test_model_file, base_file) for base_file in base_files]
         print(f"Comparing {test_model_file} against {len(base_files)} files from {base_translations_dir}")
     else:
         # Get all files from base_translations for pairwise comparison
-        jsonl_files = [f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl')]
+        jsonl_files = sorted(f for f in os.listdir(base_translations_dir) if f.endswith('.jsonl'))
         pairs = list(combinations(jsonl_files, 2))
         print(f"Generating all pairwise combinations from {len(jsonl_files)} files in {base_translations_dir}")
     
@@ -116,23 +201,31 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
                 # Load both files from the same working directory
                 convs_a = load_jsonl(os.path.join(base_translations_dir, file_a))
                 convs_b = load_jsonl(os.path.join(base_translations_dir, file_b))
+
+            for item in convs_a:
+                validate_translation_record(item, file_a)
+            for item in convs_b:
+                validate_translation_record(item, file_b)
+
+            convs_a = [task_config.normalize_record(item) for item in convs_a]
+            convs_b = [task_config.normalize_record(item) for item in convs_b]
             
             # Validate that files have equal length
             if len(convs_a) != len(convs_b):
                 raise ValueError(f"Files have different lengths: {file_a} ({len(convs_a)} items) vs {file_b} ({len(convs_b)} items)")
             
-            # Create dictionaries indexed by name for proper matching
-            convs_a_dict = {item['name']: item for item in convs_a}
-            convs_b_dict = {item['name']: item for item in convs_b}
+            # Create dictionaries indexed by item_id when available, falling back to legacy name.
+            convs_a_dict = {record_match_key(item): item for item in convs_a}
+            convs_b_dict = {record_match_key(item): item for item in convs_b}
             
-            # Validate that all names match between files
+            # Validate that all items match between files
             names_a = set(convs_a_dict.keys())
             names_b = set(convs_b_dict.keys())
             
             if names_a != names_b:
                 missing_in_a = names_b - names_a
                 missing_in_b = names_a - names_b
-                error_msg = f"Item names don't match between files {file_a} and {file_b}."
+                error_msg = f"Items don't match between files {file_a} and {file_b}."
                 if missing_in_a:
                     error_msg += f" Missing in {file_a}: {sorted(missing_in_a)}"
                 if missing_in_b:
@@ -143,6 +236,7 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
             for name in sorted(names_a):  # Sort for consistent ordering
                 conv_a = convs_a_dict[name]
                 conv_b = convs_b_dict[name]
+                validate_task_identity_fields(conv_a, conv_b, file_a, file_b)
                 # Create settings with unique ID and model names
                 settings = write_pair_settings(file_a, file_b, conv_a['name'])
                 
@@ -152,11 +246,18 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
                 # Combine into final format
                 comparison_data = {
                     "id": settings["id"],
+                    "pair_id_schema": settings["pair_id_schema"],
                     "llm_a": settings["llm_a"],
                     "llm_b": settings["llm_b"],
                     "formatted_data": formatted_data,
+                    "item_id": conv_a["item_id"],
                     "name" : conv_a["name"],
-                    "english": conv_a["english"],
+                    "task_id": conv_a["task_id"],
+                    "task_type": conv_a["task_type"],
+                    "task_version": conv_a["task_version"],
+                    "snapshot_version": snapshot_version,
+                    "source_language": conv_a["source_language"],
+                    "target_language": conv_a["target_language"],
                     "difficulty" : conv_a["difficulty"],
                     "llm_a_low_context": conv_a.get("low_context", False),
                     "llm_a_ultra_low_context": conv_a.get("ultra_low_context", False),
@@ -168,6 +269,10 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
                     "llm_b_generation_config": conv_b.get("generation_config"),
 
                 }
+                if "english" in conv_a:
+                    comparison_data["english"] = conv_a["english"]
+                comparison_data.update(task_slice_metadata(conv_a))
+                comparison_data["pair_fingerprint"] = compute_pair_fingerprint(comparison_data)
                 
                 # Write to output file
                 out_f.write(json.dumps(comparison_data, ensure_ascii=False) + '\n')
@@ -179,22 +284,38 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
 
 
 @click.command()
+@click.option('--task', envvar='TASK_CONFIG', help='Task config path or name under benchmark_tasks/.')
 @click.option('--test-model', help='Test model to generate pairs for. If not specified, pairs will be generated between all models.')
 @click.option('--generate-base', is_flag=True, help='Generate base translation pairs. This will overwrite base_conversation_pairs.jsonl')
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation prompts for automation/CI')
 @click.option('--output', help='Optional output path for pairs file (default per-model results path when --test-model).')
 @click.option('--judge-model', help='Optional judge name for embedding in default results path.')
-def main(test_model, generate_base, yes, output, judge_model):
+@click.option(
+    '--judge-profile',
+    envvar='JUDGE_PROFILE',
+    default='default',
+    show_default=True,
+    help='Judge profile path or name under judge_profiles/. Used to scope the default results path.',
+)
+def main(task, test_model, generate_base, yes, output, judge_model, judge_profile):
     """Generate conversation pairs for evaluation."""
+    judge_profile_config = load_judge_profile(judge_profile)
     if generate_base:
         # build all pairs in base_translations
-        generate_translation_pairs(force=yes, output_path=output)
+        generate_translation_pairs(force=yes, output_path=output, task=task)
     else:
         if not test_model:
             raise click.UsageError("Either --test-model or --generate-base must be specified")
         # Transform the model name into the target file path
         test_model_file = test_model.replace('/', '__') + '.jsonl'
-        generate_translation_pairs(test_model_file, force=yes, output_path=output, judge_model=judge_model)
+        generate_translation_pairs(
+            test_model_file,
+            force=yes,
+            output_path=output,
+            judge_model=judge_model,
+            judge_profile_id=judge_profile_config.profile_id,
+            task=task,
+        )
 
 if __name__ == "__main__":
     main()

@@ -1,8 +1,8 @@
 # JP-TL-Bench
 
-**JP-TL-Bench** is an anchored, pairwise LLM-judged benchmark for Japanese ↔ English translation quality.
+**JP-TL-Bench** is an anchored, pairwise LLM-judged benchmark workspace for versioned translation tasks.
 
-We have created a set of Easy and Hard translations for each direction (JA->EN and EN->JA).
+The original public benchmark is Japanese ↔ English, and the current task-config migration also supports bidirectional Chinese ↔ English.
 
 Scoring is done by an LLM-as-a-Judge against a carefully designed fixed (versioned) "Base Set" of reference model translations designed to allow reliable scoring of models based on the win/loss outcomes.
 
@@ -11,7 +11,7 @@ Scoring is done by an LLM-as-a-Judge against a carefully designed fixed (version
 
 ## Eval Summary
 
-- **Task:** ~70 prompts spanning English→Japanese and Japanese→English.
+- **Task:** JP v1.0 uses ~70 prompts spanning `en->ja` and `ja->en`; task configs define the active source/target directions for each run.
 - **Evaluation:** Pairwise A/B comparisons (test model vs anchors) judged by a configurable judge model.
 - **Scoring:** Win rate (WR%) plus Bradley–Terry-derived scores (EN, LT) for rankings.
 - **Reproducibility:** Comparisons are anchored to a versioned base set snapshot (`BASESET_SNAPSHOT_DIR`, default `baseset/v1.0`).
@@ -51,17 +51,16 @@ To switch base sets, set `BASESET_SNAPSHOT_DIR` to another snapshot directory (f
 
 ## Installation
 
-To set up the environment, first create and activate a conda/mamba environment:
+To set up the environment, create the project env explicitly:
 
 ```bash
-mamba create -n jp-tl-bench python=3.12
-mamba activate jp-tl-bench
+mamba create -n shisa-jp-tl-bench python=3.12
 ```
 
-Then, install the required packages:
+Then install the required packages into that env:
 
 ```bash
-pip install -r requirements.txt
+mamba run -n shisa-jp-tl-bench pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -74,18 +73,21 @@ API keys are managed using a `.env` file. Create a `.env` file in the root of th
 OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 GEMINI_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 MY_CUSTOM_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
 The benchmark script uses environment variables to determine which API key to use for the model being tested and for the judge model.
+Task configs can also declare a private Hugging Face dataset token env var; the current task configs use `HF_TOKEN`.
 
 ## How to Run the Benchmark
 
-The `run_translation_bench.sh` script is the main entry point for running the benchmark. It requires `MODEL` and `OPENAI_URL` to be set.
+The `run_translation_bench.sh` script is the main entry point for running the benchmark. It now requires an explicit `TASK_CONFIG` as well as `MODEL` and `OPENAI_URL`. Internally it runs each Python step via `mamba run -n shisa-jp-tl-bench ...` (or `conda run -n ...` if `mamba` is unavailable), so the workflow does not depend on an already-activated shell.
 
 ### Basic Example
-This example runs the benchmark for a local model, using the default judge model (`gemini-2.5-flash`).
+This example runs the JP task for a local model, using the default judge profile and judge model (`gemini-2.5-flash`).
 
 ```bash
+TASK_CONFIG="translation_ja_en_bidirectional_v1" \
 MODEL="shisa-ai/shisa-v2.1-qwen3-8b" \
 OPENAI_URL="http://localhost:8000/v1" \
 ./run_translation_bench.sh
@@ -96,20 +98,38 @@ OPENAI_URL="http://localhost:8000/v1" \
 This example uses a different model and API endpoint for the judge.
 
 ```bash
-MODEL=""shisa-ai/shisa-v2.1-qwen3-8b" \
+TASK_CONFIG="translation_ja_en_bidirectional_v1" \
+MODEL="shisa-ai/shisa-v2.1-qwen3-8b" \
 OPENAI_URL="http://localhost:8000/v1" \
-JUDGE_MODEL=""shisa-ai/shisa-v2-llama3.1-405b" \
+JUDGE_MODEL="shisa-ai/shisa-v2-llama3.1-405b" \
 JUDGE_URL="http://shisa-v2-405b/v1" \
 ./run_translation_bench.sh
 ```
 Runtime depends on both your generation and judging concurrency/speeds, but we find most runs take between 15-30 minutes and the average cost for a run using `gemini-2.5-flash` as a judge is around $7 (USD). 
+
+### Chinese Task Example
+
+The first Chinese release should use the `cn_judge` profile so the compare prompt is `compare-cn-v1`:
+
+```bash
+TASK_CONFIG="translation_zh_en_bidirectional_v1" \
+JUDGE_PROFILE="cn_judge" \
+MODEL="gemini-2.5-flash" \
+OPENAI_URL="https://generativelanguage.googleapis.com/v1beta/openai/" \
+MODEL_API_KEY_ENV="GEMINI_API_KEY" \
+JUDGE_MODEL="gemini-2.5-flash" \
+JUDGE_URL="https://generativelanguage.googleapis.com/v1beta/openai/" \
+JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
+./run_translation_bench.sh
+```
 
 ### Using Custom API Keys
 
 If your API keys are stored in environment variables with different names, you can specify them using `MODEL_API_KEY_ENV` and `JUDGE_API_KEY_ENV`.
 
 ```bash
-MODEL=""shisa-ai/shisa-v2.1-qwen3-8b" \
+TASK_CONFIG="translation_ja_en_bidirectional_v1" \
+MODEL="shisa-ai/shisa-v2.1-qwen3-8b" \
 OPENAI_URL="http://localhost:8000/v1" \
 MODEL_API_KEY_ENV="MY_CUSTOM_API_KEY" \
 JUDGE_MODEL="google/gemini-pro" \
@@ -120,10 +140,12 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 
 ### Environment Variables Breakdown
 
+-   `TASK_CONFIG`: (Required) Task config path or name under `benchmark_tasks/`.
 -   `MODEL`: (Required) The name of the model you are testing.
 -   `OPENAI_URL`: (Required) The API base URL for your test model.
 -   `JUDGE_MODEL`: The name of the judge model. Defaults to `gemini-2.5-flash`.
 -   `JUDGE_URL`: The API base URL for the judge model. Defaults to the Google Generative Language API.
+-   `JUDGE_PROFILE`: Judge profile path or name under `judge_profiles/`. Defaults to `default`; use `cn_judge` for the first Chinese release.
 -   `MODEL_API_KEY_ENV`: The name of the environment variable holding the API key for your test model. Defaults to `OPENAI_API_KEY`.
 -   `JUDGE_API_KEY_ENV`: The name of the environment variable holding the API key for the judge model. Defaults to `GEMINI_API_KEY`.
 -   `LOW_CONTEXT` / `ULTRA_LOW_CONTEXT`: Set to `true` to use prompts with a smaller context window. Disabled by default.
@@ -131,16 +153,19 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 
 ## Workflow
 
-1.  **Translate**: The script prompts the target model to translate a predefined set of ~70 English and Japanese text samples.
-2.  **Generate Pairs**: The new translations are paired up with existing translations from the base models in the frozen snapshot (by default `baseset/v1.0`) to create comparison pairs. `generate_shootout_data.py` reads the anchor translations directly from `BASESET_SNAPSHOT_DIR/translations`, so every run is evaluated against the same anchor set.
-3.  **Judge**: The judge model evaluates each pair and picks a winner. The analysis for each comparison is saved to the `analysis/` directory.
-4.  **Rank**: The script analyzes the win/loss data using a Bradley-Terry model to calculate scores and generate rankings.
+1.  **Translate**: The script loads the configured task items, then generates outputs for the active source-language and target-language directions.
+2.  **Generate Pairs**: The new outputs are paired against the frozen anchor outputs in `BASESET_SNAPSHOT_DIR/translations/`, and the pair file is written to `results/<snapshot>/<model>/<judge_dir>/pairs.jsonl`.
+3.  **Judge**: The judge model evaluates each pair and writes `results/<snapshot>/<model>/<judge_dir>/judgments.jsonl`.
+4.  **Rank**: The analyzer fits the Bradley-Terry model and writes `results/<snapshot>/<model>/<judge_dir>/scores.json` plus `scores.metadata.json`.
 
 ## Output Files
 
--   **Raw Analysis**: Individual JSONL files containing the judge's reasoning for each comparison are saved in `analysis/`.
--   **Scores**: The final rankings and scores are saved to `scores/<model_name>_tl_bench_scores.jsonl`.
--   **Answers**: A copy of the raw analysis file is also saved to `scores/<model_name>_tl_bench_answers.jsonl` for archival purposes.
+-   **Model Outputs**: Generated task outputs are saved to `translations/<safe_model>.jsonl`.
+-   **Pairs**: Comparison pairs are saved to `results/<snapshot>/<model>/<judge_dir>/pairs.jsonl`.
+-   **Judgments**: Pairwise judge outputs are saved to `results/<snapshot>/<model>/<judge_dir>/judgments.jsonl`.
+-   **Scores**: Canonical score summaries are saved to `results/<snapshot>/<model>/<judge_dir>/scores.json`, with additive provenance in `scores.metadata.json`.
+
+`judge_dir` is the safe judge model name for the default profile, and `safe_judge.safe_profile` for non-default judge profiles such as `cn_judge`.
 
 ## Utilities
 
@@ -175,7 +200,7 @@ You can also run the translation generation script directly using `generate_tran
 **Usage:**
 
 ```bash
-python generate_translation_data.py --base-url <api_url> --test-model <model_name> [OPTIONS]
+mamba run -n shisa-jp-tl-bench python generate_translation_data.py --task <task_config> --base-url <api_url> --test-model <model_name> [OPTIONS]
 ```
 
 **Required Options:**
@@ -184,6 +209,7 @@ python generate_translation_data.py --base-url <api_url> --test-model <model_nam
 
 **Optional Parameters:**
 - `--api-key-env`: Name of the environment variable containing the API key (defaults to `OPENAI_API_KEY`)
+- `--task`: Task config path or config name under `benchmark_tasks/` (defaults to `translation_ja_en_bidirectional_v1.yaml`)
 - `--low-context`: Use prompts optimized for smaller context windows
 - `--ultra-low-context`: Use prompts optimized for very small context windows (4096 tokens)
 - `--max-workers`: Number of worker threads for translation (default: 5)
@@ -192,10 +218,55 @@ python generate_translation_data.py --base-url <api_url> --test-model <model_nam
 **Example:**
 
 ```bash
-python generate_translation_data.py --base-url https://generativelanguage.googleapis.com/v1beta/openai/ --test-model gemini-2.5-pro --api-key-env GEMINI_API_KEY
+mamba run -n shisa-jp-tl-bench python generate_translation_data.py --task translation_ja_en_bidirectional_v1 --base-url https://generativelanguage.googleapis.com/v1beta/openai/ --test-model gemini-2.5-pro --api-key-env GEMINI_API_KEY
 ```
 
 This will generate translation data using Google's Gemini model and save the results to `translations/<model_name>.jsonl`.
+
+Task configs live under `benchmark_tasks/` and now control the dataset repo/config/revision, supported directions, translation prompt templates, and available compare-prompt profiles. The checked-in configs currently target the private dataset repo `shisa-ai/bt_translation_set_global`, so you will need `HF_TOKEN` set before generation runs can load the task items.
+Generated translation artifacts now record both the configured dataset revision and the resolved immutable Hub commit SHA in `dataset_ref`, so downstream runs remain attributable even when the task config started from a temporary publish label.
+Judge prompt selection is now config-driven as well: `translation_comparer_any_model.py` can load a task config plus a judge profile, and the resulting judgment rows carry `judge_profile_id`, `compare_prompt_profile_id`, and `judge_contract_id` for reuse safety.
+
+For the JP legacy boundary, additive result sidecars, and the first Chinese release plan, see [docs/migration-jp-v1-to-task-config.md](docs/migration-jp-v1-to-task-config.md).
+
+### Migrating Existing JP Result Files
+
+Existing JP `scores.json` files stay unchanged. To attach task and dataset metadata beside them, write an additive sidecar:
+
+```bash
+mamba run -n shisa-jp-tl-bench python scripts/migrate_result_metadata.py \
+  --task translation_ja_en_bidirectional_v1 \
+  --scores-file results/v1.0/<model>/<judge_dir>/scores.json
+```
+
+### Exporting And Validating The HF Dataset
+
+Task content now lives in the private Hugging Face dataset repo `shisa-ai/bt_translation_set_global`, exported as two configs:
+
+- `translation_ja_en_bidirectional_v1`
+- `translation_zh_en_bidirectional_v1`
+
+Rebuild the local export plus provenance docs with:
+
+```bash
+mamba run -n shisa-jp-tl-bench python scripts/export_hf_dataset.py
+```
+
+Validate a specific task export before any publish with:
+
+```bash
+mamba run -n shisa-jp-tl-bench python scripts/validate_hf_dataset.py --task benchmark_tasks/translation_zh_en_bidirectional_v1.yaml
+```
+
+That validator checks required columns, deterministic ordering, `item_id` uniqueness, expected language/difficulty balance, Chinese-source provenance metadata, and a pair-generation round trip against the current task config.
+
+The export script also refreshes:
+
+- `docs/chinese_source_manifest.csv`
+- `docs/translation_set_inventory.csv`
+- `hf_datasets/bt_translation_set_global/README.md`
+
+For the full publish/update workflow, including the post-publish revision lock step, see [docs/hf-dataset-publishing.md](docs/hf-dataset-publishing.md).
 
 ### Viewing Results with the TUI
 
@@ -250,13 +321,13 @@ Over time, analysis files may accumulate invalid entries (e.g., malformed JSON, 
 **Usage:**
 
 ```bash
-python utils/clean_analysis_file.py path/to/your/analysis_file.jsonl
+mamba run -n shisa-jp-tl-bench python utils/clean_analysis_file.py path/to/your/judgments.jsonl
 ```
 
 **Example:**
 
 ```bash
-python utils/clean_analysis_file.py analysis/base_set.gemini-2.5-flash.jsonl
+mamba run -n shisa-jp-tl-bench python utils/clean_analysis_file.py results/v1.0/<model>/<judge_dir>/judgments.jsonl
 ```
 
 ## Citation

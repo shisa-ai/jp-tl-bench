@@ -13,16 +13,85 @@ import threading
 from dataclasses import dataclass
 from typing import Optional
 
+from benchmark_tasks import load_task_config, resolve_dataset_ref
+
 load_dotenv()
 
+FAILED_TRANSLATION_PREFIX = "[TRANSLATION FAILED:"
+
 @dataclass
-class ModelConfig:
-    """Configuration for model-specific parameters."""
+class GenerationAdapter:
+    """Reusable model/provider generation configuration."""
+    profile_id: str = "default"
     temperature: Optional[float] = 0.1
     top_p: Optional[float] = 0.85
     frequency_penalty: Optional[float] = None
     reasoning_effort: Optional[str] = None
     prompt_file: Optional[str] = None  # Override prompt file path (relative to project root)
+
+    def build_request(self, *, model_name: str, prompt_text: str, max_tokens: int | None) -> dict:
+        params = {
+            "messages": [{"role": "user", "content": prompt_text}],
+            "model": model_name,
+        }
+        if self.temperature is not None:
+            params["temperature"] = self.temperature
+        if self.top_p is not None:
+            params["top_p"] = self.top_p
+        if self.frequency_penalty is not None:
+            params["frequency_penalty"] = self.frequency_penalty
+        if self.reasoning_effort is not None:
+            params["reasoning_effort"] = self.reasoning_effort
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
+        return params
+
+
+def resolve_generation_adapter(model_name: str) -> GenerationAdapter:
+    """Map model quirks to a reusable generation adapter."""
+    model_lower = model_name.lower()
+
+    if "claude-opus-4-1" in model_lower:
+        return GenerationAdapter(
+            profile_id="claude-opus-4-1",
+            temperature=0.2,
+            top_p=None,
+        )
+
+    if "gpt-5-mini" in model_lower or "gpt-5-nano" in model_lower:
+        return GenerationAdapter(
+            profile_id="gpt-5-lite",
+            temperature=None,
+            top_p=None,
+        )
+
+    if "gpt-5" in model_lower and "gpt-5-chat-latest" not in model_lower:
+        return GenerationAdapter(
+            profile_id="gpt-5",
+            reasoning_effort="minimal",
+            temperature=0.1,
+            top_p=0.85,
+        )
+
+    if "gemini-2.5-pro" in model_lower:
+        return GenerationAdapter(
+            profile_id="gemini-2.5-pro",
+            reasoning_effort="low",
+        )
+
+    if "gemini-2.5" in model_lower:
+        return GenerationAdapter(
+            profile_id="gemini-2.5",
+            reasoning_effort="low",
+        )
+
+    if "cat-translate" in model_lower:
+        return GenerationAdapter(
+            profile_id="cat-translate",
+            prompt_file="prompts/translate_prompt_simple.txt",
+        )
+
+    return GenerationAdapter()
 
 class Translator:
     """Translates text using a specified model."""
@@ -32,12 +101,16 @@ class Translator:
         model_name: str,
         base_url: str,
         api_key: str,
+        task_config=None,
+        dataset_ref: Optional[dict] = None,
         low_context: bool = False,
         ultra_low_context: bool = False,
         concurrency_limit: int = 5,
         max_tokens: int = 8192,
     ):
         self.model_name = model_name
+        self.task_config = task_config or load_task_config()
+        self.dataset_ref = dataset_ref or self.task_config.dataset.to_dict()
         self.low_context = low_context
         self.ultra_low_context = ultra_low_context
         self.client = OpenAI(
@@ -50,84 +123,87 @@ class Translator:
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
         self.max_tokens = max_tokens
 
-    def get_model_config(self) -> ModelConfig:
-        """Get model-specific configuration based on model name."""
-        model_lower = self.model_name.lower()
-        
-        # Claude Opus 4.1 - no top_p
-        if "claude-opus-4-1" in model_lower:
-            return ModelConfig(
-                temperature=0.2,
-                top_p=None
-            )
-        
-        # GPT-5 mini/nano - no temperature/top_p 
-        if "gpt-5-mini" in model_lower or "gpt-5-nano" in model_lower:
-            return ModelConfig(
-                temperature=None,
-                top_p=None
-            )
-        
-        # Gemini 2.5 Pro - reasoning effort required
-        if "gemini-2.5-pro" in model_lower:
-            return ModelConfig(
-                reasoning_effort="low"
-            )
-        
-        # GPT-5 (not chat-latest) - minimal reasoning
-        if "gpt-5" in model_lower and "gpt-5-chat-latest" not in model_lower:
-            return ModelConfig(
-                reasoning_effort="minimal"
-            )
-        
-        # Legacy Gemini 2.5 support (keeping existing behavior)
-        if "gemini-2.5" in model_lower:
-            return ModelConfig(
-                reasoning_effort="low"
-            )
-        
-        # CAT-Translate - simple prompt, default sampling
-        if "cat-translate" in model_lower:
-            return ModelConfig(
-                prompt_file="prompts/translate_prompt_simple.txt"
-            )
+    def get_generation_adapter(self) -> GenerationAdapter:
+        return resolve_generation_adapter(self.model_name)
 
-        # Default configuration
-        return ModelConfig()
+    def get_prompt_path(self, source_language: str, target_language: str) -> str:
+        """Determine the task-configured prompt file for the active direction and context setting."""
+        return str(
+            self.task_config.get_prompt_path(
+                source_language,
+                target_language,
+                low_context=self.low_context,
+                ultra_low_context=self.ultra_low_context,
+            )
+        )
 
-    def get_prompt_path(self, english: bool) -> str:
-        """Determine which prompt file to use based on input language and context setting."""
-        base_name = "translate_prompt_from_english" if english else "translate_prompt_from_japanese"
-        if self.ultra_low_context:
-            base_name += "_ultra_low_context"
-        elif self.low_context:
-            base_name += "_low_context"
-        return f"prompts/{base_name}.txt"
-
-    def get_prompt(self, input_data: dict) -> str:
+    def get_prompt(self, input_data: dict) -> tuple[str, str]:
         """Generate a prompt for translation using the appropriate template based on input language."""
-        model_config = self.get_model_config()
-        if model_config.prompt_file:
-            prompt_path = model_config.prompt_file
+        normalized = self.task_config.normalize_record(input_data, require_source_text=True)
+        generation_adapter = self.get_generation_adapter()
+        if generation_adapter.prompt_file:
+            prompt_path = generation_adapter.prompt_file
         else:
-            english = input_data.get("english", True)
-            prompt_path = self.get_prompt_path(english)
+            prompt_path = self.get_prompt_path(
+                normalized["source_language"],
+                normalized["target_language"],
+            )
 
         if not os.path.exists(prompt_path):
             raise SystemExit(f"Error: Missing prompt file: {prompt_path}. See README for setup.")
         
         with open(prompt_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
-        english = input_data.get("english", True)
-        src_lang, tgt_lang = ("English", "Japanese") if english else ("Japanese", "English")
-        return (prompt_template
-            .replace("{{text}}", input_data["text"])
+        src_lang = self.task_config.get_language_name(normalized["source_language"])
+        tgt_lang = self.task_config.get_language_name(normalized["target_language"])
+        prompt_text = (prompt_template
+            .replace("{{text}}", normalized["source_text"])
             .replace("{{src_lang}}", src_lang)
             .replace("{{tgt_lang}}", tgt_lang)
         )
+        return prompt_text, prompt_path
 
-    def parse(self, input_data: dict, response: str, prompt_text: str, generation_config: dict) -> dict:
+    def build_output_base(self, input_data: dict, prompt_text: str, prompt_path: str) -> dict:
+        normalized = self.task_config.normalize_record(input_data, require_source_text=True)
+        output = {
+            "item_id": normalized["item_id"],
+            "name": normalized["name"],
+            "task_id": normalized["task_id"],
+            "task_type": normalized["task_type"],
+            "task_version": normalized["task_version"],
+            "source_text": normalized["source_text"],
+            "difficulty": normalized["difficulty"],
+            "source_language": normalized["source_language"],
+            "target_language": normalized["target_language"],
+            "dataset_ref": self.dataset_ref,
+            "task_config_digest": self.task_config.task_config_digest,
+            "model": self.model_name,
+            "generation_profile_id": "default",
+            "prompt_profile": self.task_config.get_prompt_variant(
+                low_context=self.low_context,
+                ultra_low_context=self.ultra_low_context,
+            ),
+            "prompt_template": prompt_path,
+            "prompt": prompt_text,
+            "low_context": self.low_context,
+            "ultra_low_context": self.ultra_low_context,
+        }
+        if "english" in normalized:
+            output["english"] = normalized["english"]
+        return output
+
+    def parse(
+        self,
+        input_data: dict,
+        response: str,
+        prompt_text: str,
+        prompt_path: str | dict,
+        generation_config: Optional[dict] = None,
+    ) -> dict:
         """Parse the model response along with the input data into the desired output format."""
+        if generation_config is None:
+            generation_config = prompt_path
+            prompt_path = "<in-memory>"
         matches = re.findall(r'<translation>(.*?)</translation>', response, re.DOTALL)
         if not matches:
             print(f"Error: No translation tags found in response for input: {input_data['name']}")
@@ -144,19 +220,15 @@ class Translator:
             translation = matches[-1]
 
         return {
-            "name": input_data["name"],
-            "source_text": input_data["text"],
-            "difficulty" : input_data["difficulty"],
-            "english" : input_data["english"],
+            **self.build_output_base(input_data, prompt_text, prompt_path),
+            "status": "ok",
+            "generation_profile_id": generation_config.get("profile_id", "default"),
             "full_response": response,
             "translation": translation,
-            "prompt": prompt_text,
             "temperature": generation_config.get("temperature"),
             "top_p": generation_config.get("top_p"),
             "frequency_penalty": generation_config.get("frequency_penalty"),
             "reasoning_effort": generation_config.get("reasoning_effort"),
-            "low_context": self.low_context,
-            "ultra_low_context": self.ultra_low_context,
             "generation_config": generation_config
         }
 
@@ -166,7 +238,15 @@ class Translator:
         time.sleep(random.uniform(0.1, 0.5))
 
         with self.semaphore:
-            prompt_text = self.get_prompt(item)
+            prompt_result = self.get_prompt(item)
+            if isinstance(prompt_result, tuple):
+                prompt_text, prompt_path = prompt_result
+            else:
+                prompt_text = prompt_result
+                prompt_path = self.get_prompt_path(
+                    self.task_config.normalize_record(item)["source_language"],
+                    self.task_config.normalize_record(item)["target_language"],
+                )
 
             max_retries = 5
             base_delay = 1
@@ -174,29 +254,17 @@ class Translator:
             for attempt in range(max_retries + 1):
                 try:
                     # Get model-specific configuration
-                    model_config = self.get_model_config()
-
-                    # Build parameters based on model config
-                    params = {
-                        "messages": [{"role": "user", "content": prompt_text}],
-                        "model": self.model_name,
-                    }
-
-                    # Add parameters only if they are not None
-                    if model_config.temperature is not None:
-                        params["temperature"] = model_config.temperature
-                    if model_config.top_p is not None:
-                        params["top_p"] = model_config.top_p
-                    if model_config.frequency_penalty is not None:
-                        params["frequency_penalty"] = model_config.frequency_penalty
-                    if model_config.reasoning_effort is not None:
-                        params["reasoning_effort"] = model_config.reasoning_effort
-                    if self.max_tokens is not None:
-                        params["max_tokens"] = self.max_tokens
+                    generation_adapter = self.get_generation_adapter()
+                    params = generation_adapter.build_request(
+                        model_name=self.model_name,
+                        prompt_text=prompt_text,
+                        max_tokens=self.max_tokens,
+                    )
 
                     # Create generation config for saving
                     generation_config = params.copy()
                     generation_config.pop("messages", None)  # Remove messages from config
+                    generation_config["profile_id"] = generation_adapter.profile_id
 
                     chat_completion = self.client.chat.completions.create(**params)
                     if not chat_completion.choices or chat_completion.choices[0].message.content is None:
@@ -209,7 +277,7 @@ class Translator:
                         self.total_input_tokens += chat_completion.usage.prompt_tokens
                         self.total_output_tokens += chat_completion.usage.completion_tokens
 
-                    parsed_result = self.parse(item, response, prompt_text, generation_config)
+                    parsed_result = self.parse(item, response, prompt_text, prompt_path, generation_config)
                     return parsed_result
 
                 except Exception as e:
@@ -227,23 +295,20 @@ class Translator:
                         )
                         # Return a placeholder result so downstream scripts
                         # always see the full set of items.
-                        placeholder_translation = f"[TRANSLATION FAILED: {error_msg}]"
+                        placeholder_translation = f"{FAILED_TRANSLATION_PREFIX} {error_msg}]"
                         return {
-                            "name": item.get("name", "unknown"),
-                            "source_text": item.get("text", ""),
-                            "difficulty": item.get("difficulty"),
-                            "english": item.get("english", True),
+                            **self.build_output_base(item, prompt_text, prompt_path),
+                            "status": "failed",
+                            "generation_profile_id": self.get_generation_adapter().profile_id,
                             "full_response": "",
                             "translation": placeholder_translation,
-                            "prompt": prompt_text,
                             "temperature": None,
                             "top_p": None,
                             "frequency_penalty": None,
                             "reasoning_effort": None,
-                            "low_context": self.low_context,
-                            "ultra_low_context": self.ultra_low_context,
                             "generation_config": {
                                 "error": error_msg,
+                                "profile_id": self.get_generation_adapter().profile_id,
                                 "temperature": None,
                                 "top_p": None,
                                 "frequency_penalty": None,
@@ -265,6 +330,7 @@ class Translator:
 
 
 @click.command()
+@click.option('--task', envvar='TASK_CONFIG', help='Task config path or name under benchmark_tasks/.')
 @click.option('--base-url', '-u', required=True, help='Base URL for the API endpoint')
 @click.option('--test-model', '-t', required=True, help='Model name to use for translation')
 @click.option('--low-context', is_flag=True, help='Use low context prompts')
@@ -273,28 +339,59 @@ class Translator:
 @click.option('--concurrency-limit', default=5, help='Max number of concurrent API requests.')
 @click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
 @click.option('--max-tokens', default=8192, show_default=True, help='Maximum completion tokens per translation.')
-def main(base_url, test_model, low_context, ultra_low_context, max_workers, concurrency_limit, api_key_env, max_tokens):
+def main(task, base_url, test_model, low_context, ultra_low_context, max_workers, concurrency_limit, api_key_env, max_tokens):
     """Translate text using the specified model.
 
-    Loads the translation test set from shisa-ai/bt_translation_test,
+    Loads the translation task set from the configured Hugging Face dataset,
     translates the source texts, and saves the results to a JSONL file.
     """
     os.makedirs("translations", exist_ok=True)
-    
-    dataset = load_dataset("shisa-ai/bt_translation_test")["train"]
+    task_config = load_task_config(task)
+    hf_token = None
+    if task_config.dataset.hf_token_env:
+        hf_token = os.getenv(task_config.dataset.hf_token_env)
+        if not hf_token:
+            raise SystemExit(
+                f"Error: Missing Hugging Face token in env var {task_config.dataset.hf_token_env} "
+                f"for private dataset {task_config.dataset.repo}"
+            )
+
+    dataset = load_dataset(
+        task_config.dataset.repo,
+        task_config.dataset.config,
+        split=task_config.dataset.split,
+        revision=task_config.dataset.revision,
+        token=hf_token,
+    )
+    normalized_dataset = [
+        task_config.normalize_record(dict(item), require_source_text=True)
+        for item in dataset
+        if task_config.supports_record(dict(item))
+    ]
+    try:
+        dataset_ref = resolve_dataset_ref(task_config, token=hf_token)
+    except Exception as exc:
+        raise SystemExit(
+            f"Error: Could not resolve an immutable dataset revision for "
+            f"{task_config.dataset.repo}@{task_config.dataset.revision}: {exc}"
+        ) from exc
 
     api_key = os.getenv(api_key_env)
+    if not api_key:
+        raise SystemExit(f"Error: Missing API key. Set {api_key_env} in your environment.")
     translator = Translator(
         model_name=test_model,
         base_url=base_url,
         api_key=api_key,
+        task_config=task_config,
+        dataset_ref=dataset_ref,
         low_context=low_context,
         ultra_low_context=ultra_low_context,
         concurrency_limit=concurrency_limit,
         max_tokens=max_tokens,
     )
 
-    results = translator(dataset, max_workers=max_workers)
+    results = translator(normalized_dataset, max_workers=max_workers)
     
     safe_model_name = test_model.replace("/", "__")
     output_path = os.path.join("translations", f"{safe_model_name}.jsonl")

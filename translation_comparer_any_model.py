@@ -10,8 +10,24 @@ from openai import OpenAI
 import click
 import concurrent.futures
 import threading
+from dataclasses import dataclass
 from tqdm import tqdm
 from dotenv import load_dotenv
+from artifact_paths import candidate_results_dir, resolve_result_file_candidates
+from baseset.legacy_boundary import (
+    is_legacy_jp_v1_snapshot,
+    schema_v2_path,
+)
+from benchmark_tasks import (
+    load_judge_profile,
+    load_task_config,
+    resolve_compare_prompt_path,
+)
+from pair_contract import (
+    PAIR_ID_SCHEMA_V1,
+    compute_pair_fingerprint,
+    ensure_pair_contract_metadata,
+)
 
 load_dotenv()
 
@@ -23,11 +39,282 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
+FAILED_TRANSLATION_PREFIX = "[TRANSLATION FAILED:"
+REUSE_MATCH_FIELDS = (
+    "task_id",
+    "task_type",
+    "task_version",
+    "source_language",
+    "target_language",
+    "difficulty",
+    "snapshot_version",
+    "judge_profile_id",
+    "compare_prompt_profile_id",
+    "judge_parser_id",
+    "judge_contract_id",
+)
+
+
+def build_judge_contract_id(judge_model: str, compare_prompt_profile_id: str, parser_id: str) -> str:
+    return f"{judge_model}::{compare_prompt_profile_id}::{parser_id}"
+
+
+def annotate_pair_for_judging(
+    pair: dict,
+    *,
+    judge_model: str,
+    judge_profile_id: str,
+    compare_prompt_profile_id: str,
+    parser_id: str,
+    snapshot_version: str,
+) -> dict:
+    annotated = dict(pair)
+    annotated["snapshot_version"] = annotated.get("snapshot_version", snapshot_version)
+    annotated["judge_profile_id"] = judge_profile_id
+    annotated["compare_prompt_profile_id"] = compare_prompt_profile_id
+    annotated["judge_parser_id"] = parser_id
+    annotated["judge_contract_id"] = build_judge_contract_id(
+        judge_model,
+        compare_prompt_profile_id,
+        parser_id,
+    )
+    return annotated
+
+
+def swap_formatted_translation_sections(formatted_data: str) -> str:
+    """Keep A/B headings stable while swapping the translation bodies under them."""
+    lines = formatted_data.splitlines(keepends=True)
+
+    def find_line(label: str, start: int = 0) -> int:
+        for index in range(start, len(lines)):
+            if lines[index].strip() == label:
+                return index
+        raise ValueError(f"Missing '{label}' section in formatted_data")
+
+    a_header_idx = find_line("## Translation A")
+    b_header_idx = find_line("## Translation B", start=a_header_idx + 1)
+    end_idx = find_line("---", start=b_header_idx + 1)
+
+    prefix = lines[: a_header_idx + 1]
+    section_a = lines[a_header_idx + 1 : b_header_idx]
+    b_header = lines[b_header_idx : b_header_idx + 1]
+    section_b = lines[b_header_idx + 1 : end_idx]
+    suffix = lines[end_idx:]
+
+    return "".join(prefix + section_b + b_header + section_a + suffix)
+
+
+def validate_pair_record(pair: dict) -> None:
+    """Reject pair records that embed unresolved failed generations."""
+    formatted_data = pair.get("formatted_data", "")
+    if isinstance(formatted_data, str) and FAILED_TRANSLATION_PREFIX in formatted_data:
+        raise ValueError(
+            f"Cannot judge pair {pair.get('id', 'unknown')} because it contains a failed generation placeholder"
+        )
+
+
+def existing_judgment_matches_pair(existing: dict, pair: dict) -> bool:
+    if not existing or existing.get("id") != pair.get("id"):
+        return False
+
+    pair_fingerprint = pair.get("pair_fingerprint")
+    existing_fingerprint = existing.get("pair_fingerprint")
+    for key in REUSE_MATCH_FIELDS:
+        pair_value = pair.get(key)
+        existing_value = existing.get(key)
+        if pair_value and existing_value and pair_value != existing_value:
+            return False
+
+    if pair_fingerprint and existing_fingerprint:
+        return pair_fingerprint == existing_fingerprint
+
+    if (
+        pair.get("pair_id_schema") == PAIR_ID_SCHEMA_V1
+        and existing.get("pair_id_schema") in (None, PAIR_ID_SCHEMA_V1)
+        and not existing_fingerprint
+    ):
+        return True
+
+    return not pair_fingerprint and not existing_fingerprint
+
+
+def extract_pair_payload(record: dict) -> dict:
+    pair_payload = {
+        "id": record.get("id"),
+        "pair_id_schema": record.get("pair_id_schema") or PAIR_ID_SCHEMA_V1,
+        "llm_a": record.get("llm_a"),
+        "llm_b": record.get("llm_b"),
+        "formatted_data": record.get("formatted_data"),
+        "name": record.get("name"),
+        "english": record.get("english"),
+        "difficulty": record.get("difficulty"),
+    }
+    for key, value in record.items():
+        if key.startswith("llm_a_") or key.startswith("llm_b_"):
+            pair_payload[key] = value
+    return pair_payload
+
+
+def normalize_reused_judgment(existing: dict, pair: dict) -> dict:
+    merged = dict(existing)
+    if pair.get("pair_id_schema") and not merged.get("pair_id_schema"):
+        merged["pair_id_schema"] = pair["pair_id_schema"]
+    if not merged.get("pair_fingerprint"):
+        merged["pair_fingerprint"] = compute_pair_fingerprint(extract_pair_payload(merged))
+    for key in REUSE_MATCH_FIELDS:
+        if pair.get(key) and not merged.get(key):
+            merged[key] = pair[key]
+    if pair.get("item_id") and not merged.get("item_id"):
+        merged["item_id"] = pair["item_id"]
+    return merged
+
+
+def swap_translation_pair_sides(pair: dict) -> dict:
+    """Swap pair sides, keeping metadata and displayed labels aligned."""
+    pair["llm_a"], pair["llm_b"] = pair["llm_b"], pair["llm_a"]
+
+    suffixes = {
+        key[len("llm_a_") :]
+        for key in pair
+        if key.startswith("llm_a_")
+    } | {
+        key[len("llm_b_") :]
+        for key in pair
+        if key.startswith("llm_b_")
+    }
+    for suffix in suffixes:
+        a_key = f"llm_a_{suffix}"
+        b_key = f"llm_b_{suffix}"
+        a_value = pair.get(a_key)
+        b_value = pair.get(b_key)
+        if a_key in pair or b_key in pair:
+            pair[a_key] = b_value
+            pair[b_key] = a_value
+
+    pair["formatted_data"] = swap_formatted_translation_sections(pair["formatted_data"])
+    return pair
+
+
+def should_swap_pair(pair: dict) -> bool:
+    pair_id = pair.get("id", "")
+    if not pair_id:
+        return False
+    try:
+        pair_value = int(pair_id, 16)
+    except ValueError:
+        pair_value = sum(ord(char) for char in pair_id)
+    return pair_value % 2 == 1
+
+
+@dataclass
+class JudgeResponse:
+    text: str
+    generation_config: dict
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class OpenAIJudgeAdapter:
+    OPENAI_UNSUPPORTED_REQUEST_SETTINGS = {"thinking_budget"}
+
+    def __init__(self, model_name: str, request_settings: dict | None = None):
+        self.model_name = model_name
+        self.request_settings = dict(request_settings or {})
+
+    def request(self, client: OpenAI, prompt_text: str) -> JudgeResponse:
+        call_params = {
+            "messages": [{"role": "user", "content": prompt_text}],
+            "model": self.model_name,
+        }
+        for key, value in self.request_settings.items():
+            if value is not None and key not in self.OPENAI_UNSUPPORTED_REQUEST_SETTINGS:
+                call_params[key] = value
+
+        judge_generation_config = call_params.copy()
+        judge_generation_config.pop("messages", None)
+
+        chat_completion = client.chat.completions.create(**call_params)
+        if not chat_completion.choices or chat_completion.choices[0].message.content is None:
+            raise ValueError("Empty response from API")
+
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(chat_completion, "usage") and chat_completion.usage:
+            input_tokens = chat_completion.usage.prompt_tokens
+            output_tokens = chat_completion.usage.completion_tokens
+
+        return JudgeResponse(
+            text=chat_completion.choices[0].message.content,
+            generation_config=judge_generation_config,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+
+class GeminiJudgeAdapter:
+    def __init__(self, model_name: str, safety_settings: list, request_settings: dict | None = None):
+        self.model_name = model_name
+        self.safety_settings = safety_settings
+        self.request_settings = dict(request_settings or {})
+
+    def request(self, client, prompt_text: str) -> JudgeResponse:
+        thinking_budget = self.request_settings.get("thinking_budget")
+        thinking_config = None
+        if thinking_budget is not None:
+            thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
+
+        gen_config = genai_types.GenerateContentConfig(
+            temperature=self.request_settings.get("temperature", 0.0),
+            safety_settings=self.safety_settings,
+            thinking_config=thinking_config,
+        )
+
+        judge_generation_config = {
+            "temperature": self.request_settings.get("temperature", 0.0),
+            "model": self.model_name,
+        }
+        for key in ("reasoning_effort",):
+            if key in self.request_settings:
+                judge_generation_config[key] = self.request_settings[key]
+        if thinking_config is not None:
+            judge_generation_config["thinking_budget"] = thinking_budget
+
+        response = client.models.generate_content(
+            model=self.model_name,
+            contents=prompt_text,
+            config=gen_config,
+        )
+
+        if not response.text:
+            raise ValueError("Empty response from API")
+
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, "usage_metadata"):
+            input_tokens = getattr(response.usage_metadata, "prompt_token_count", 0)
+            output_tokens = getattr(response.usage_metadata, "candidates_token_count", 0)
+
+        return JudgeResponse(
+            text=response.text,
+            generation_config=judge_generation_config,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
 
 class TranslationComparer:
     """Compares two translations and analyzes their differences."""
 
-    def __init__(self, model_name: str, base_url: str, api_key: str, concurrency_limit: int, prompt_path: Path, use_gemini: bool = False):
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        concurrency_limit: int,
+        prompt_path: Path,
+        use_gemini: bool = False,
+        judge_request_settings: dict | None = None,
+    ):
         self.model_name = model_name
         self.use_gemini = use_gemini
         self.total_input_tokens = 0
@@ -35,6 +322,7 @@ class TranslationComparer:
         self.failed_items = []
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
         self.prompt_path = prompt_path
+        self.judge_request_settings = dict(judge_request_settings or {})
 
         if use_gemini:
             if not GEMINI_AVAILABLE:
@@ -55,10 +343,19 @@ class TranslationComparer:
                     category="HARM_CATEGORY_HARASSMENT", threshold="OFF"
                 ),
             ]
+            self.adapter = GeminiJudgeAdapter(
+                model_name,
+                self.safety_settings,
+                request_settings=self.judge_request_settings,
+            )
         else:
             self.client = OpenAI(
                 base_url=base_url,
                 api_key=api_key,
+            )
+            self.adapter = OpenAIJudgeAdapter(
+                model_name,
+                request_settings=self.judge_request_settings,
             )
 
     def prompt(self, input_data: dict) -> str:
@@ -69,11 +366,23 @@ class TranslationComparer:
 
     def parse(self, input_data: dict, response: str, judge_generation_config: dict, judge_model: str) -> dict:
         """Parse the model response along with the input data into the desired output format."""
-        return {
+        output = {
+            "item_id": input_data.get("item_id"),
             "name": input_data["name"],
-            "english": input_data["english"],
             "difficulty": input_data["difficulty"],
+            "task_id": input_data.get("task_id"),
+            "task_type": input_data.get("task_type"),
+            "task_version": input_data.get("task_version"),
+            "source_language": input_data.get("source_language"),
+            "target_language": input_data.get("target_language"),
+            "snapshot_version": input_data.get("snapshot_version"),
             "id": input_data["id"],
+            "pair_id_schema": input_data.get("pair_id_schema"),
+            "pair_fingerprint": input_data.get("pair_fingerprint"),
+            "judge_profile_id": input_data.get("judge_profile_id"),
+            "compare_prompt_profile_id": input_data.get("compare_prompt_profile_id"),
+            "judge_parser_id": input_data.get("judge_parser_id"),
+            "judge_contract_id": input_data.get("judge_contract_id"),
             "llm_a": input_data["llm_a"],
             "llm_b": input_data["llm_b"],
             "formatted_data": input_data["formatted_data"],
@@ -90,87 +399,15 @@ class TranslationComparer:
             "llm_b_temperature": input_data.get("llm_b_temperature"),
             "llm_b_generation_config": input_data.get("llm_b_generation_config"),
         }
-
-    def compare_item_gemini(self, item: dict) -> dict:
-        """Compares a single item using native Gemini API with retry logic and concurrency control."""
-        # Add jitter to spread out requests
-        time.sleep(random.uniform(0.1, 0.5))
-
-        with self.semaphore:
-            prompt_text = self.prompt(item)
-
-            max_retries = 5
-            base_delay = 1
-
-            for attempt in range(max_retries + 1):
-                try:
-                    # Set up thinking config for Gemini 2.5 models
-                    # thinking_budget is in tokens: 0 = disabled (flash), 128 = low (pro), 512 = medium, higher = more thinking
-                    thinking_config = None
-                    thinking_budget = 0
-                    if 'gemini-2.5-pro' in self.model_name:
-                        thinking_budget = 128
-                        thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
-                    elif 'gemini-2.5' in self.model_name:
-                        # Flash or other 2.5 models - disable thinking
-                        thinking_budget = 0
-                        thinking_config = genai_types.ThinkingConfig(thinking_budget=thinking_budget)
-
-                    # Set up generation config
-                    gen_config = genai_types.GenerateContentConfig(
-                        temperature=0.0,
-                        safety_settings=self.safety_settings,
-                        thinking_config=thinking_config,
-                    )
-
-                    # Create judge generation config for saving
-                    judge_generation_config = {
-                        "temperature": 0.0,
-                        "model": self.model_name,
-                    }
-                    if thinking_config:
-                        judge_generation_config['thinking_budget'] = thinking_budget
-
-                    # Generate content
-                    response = self.client.models.generate_content(
-                        model=self.model_name,
-                        contents=prompt_text,
-                        config=gen_config,
-                    )
-
-                    if not response.text:
-                        raise ValueError("Empty response from API")
-
-                    # Track token usage
-                    if hasattr(response, 'usage_metadata'):
-                        self.total_input_tokens += getattr(response.usage_metadata, 'prompt_token_count', 0)
-                        self.total_output_tokens += getattr(response.usage_metadata, 'candidates_token_count', 0)
-
-                    parsed_result = self.parse(item, response.text, judge_generation_config, self.model_name)
-                    return parsed_result
-
-                except Exception as e:
-                    error_msg = f"API error: {type(e).__name__}: {str(e)}"
-                    if attempt == max_retries:
-                        # Track failed item
-                        failed_item = {
-                            "id": item.get("id", "unknown"),
-                            "name": item.get("name", "unknown"),
-                            "error": error_msg,
-                            "attempts": max_retries + 1
-                        }
-                        self.failed_items.append(failed_item)
-                        print(f"Failed to process item {item.get('name', 'unknown')} after {max_retries + 1} attempts: {error_msg}")
-                        return None  # Return None for failed items
-                    delay = base_delay * (2 ** attempt)
-                    print(f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s...")
-                    time.sleep(delay)
+        if "english" in input_data:
+            output["english"] = input_data["english"]
+        for key in ("category", "tags", "slice_tags"):
+            if key in input_data:
+                output[key] = input_data[key]
+        return output
 
     def compare_item(self, item: dict) -> dict:
         """Compares a single item with retry logic and concurrency control."""
-        if self.use_gemini:
-            return self.compare_item_gemini(item)
-
         # Add jitter to spread out requests
         time.sleep(random.uniform(0.1, 0.5))
 
@@ -182,36 +419,15 @@ class TranslationComparer:
 
             for attempt in range(max_retries + 1):
                 try:
-                    temp = 0
-                    lower_name = self.model_name.lower()
-                    if "gpt-5" in lower_name:
-                        temp = None  # gpt-5 disallows explicit temperature; use model default
-                    call_params = {
-                        "messages": [{"role": "user", "content": prompt_text}],
-                        "model": self.model_name,
-                    }
-                    if temp is not None:
-                        call_params["temperature"] = temp
-
-                    if 'gemini-2.5' in self.model_name:
-                        call_params['reasoning_effort'] = 'low'
-
-                    # Create judge generation config for saving
-                    judge_generation_config = call_params.copy()
-                    judge_generation_config.pop("messages", None)  # Remove messages from config
-
-                    chat_completion = self.client.chat.completions.create(**call_params)
-                    if not chat_completion.choices or chat_completion.choices[0].message.content is None:
-                        raise ValueError("Empty response from API")
-
-                    response = chat_completion.choices[0].message.content
-
-                    # Track token usage
-                    if hasattr(chat_completion, 'usage') and chat_completion.usage:
-                        self.total_input_tokens += chat_completion.usage.prompt_tokens
-                        self.total_output_tokens += chat_completion.usage.completion_tokens
-
-                    parsed_result = self.parse(item, response, judge_generation_config, self.model_name)
+                    judge_response = self.adapter.request(self.client, prompt_text)
+                    self.total_input_tokens += judge_response.input_tokens
+                    self.total_output_tokens += judge_response.output_tokens
+                    parsed_result = self.parse(
+                        item,
+                        judge_response.text,
+                        judge_response.generation_config,
+                        self.model_name,
+                    )
                     return parsed_result
 
                 except Exception as e:
@@ -241,10 +457,18 @@ class TranslationComparer:
 
 
 @click.command()
+@click.option('--task', envvar='TASK_CONFIG', help='Task config path or name under benchmark_tasks/.')
+@click.option(
+    '--judge-profile',
+    envvar='JUDGE_PROFILE',
+    default='default',
+    show_default=True,
+    help='Judge profile path or name under judge_profiles/.',
+)
 @click.option(
     '--base-url',
     '-u',
-    default=os.getenv("JUDGE_URL", "https://api.openai.com/v1"),
+    default=os.getenv("JUDGE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"),
     show_default=True,
     help='Base URL for the judge API endpoint (ignored if --gemini-judge is set).',
 )
@@ -261,14 +485,14 @@ class TranslationComparer:
 @click.option('--concurrency-limit', default=40, help='Max number of concurrent API requests.')
 @click.option(
     '--api-key-env',
-    default=os.getenv("JUDGE_API_KEY_ENV", "OPENAI_API_KEY"),
+    default=os.getenv("JUDGE_API_KEY_ENV", "GEMINI_API_KEY"),
     show_default=True,
-    help='Env var name that holds the judge API key. Use GEMINI_API_KEY when --gemini-judge.',
+    help='Env var name that holds the judge API key.',
 )
 @click.option(
     '--pairs-file',
     type=click.Path(),
-    help='Optional path to translation pairs JSONL. Overrides default base_conversation_pairs.jsonl/latest_conversation_pairs.jsonl.',
+    help='Optional path to pair JSONL. Overrides the default snapshot-local base-set pair file or results-local candidate pair file.',
 )
 @click.option('--skip-ids', help='Comma-separated list of IDs to skip (already processed). Deprecated - use --skip-ids-file instead.')
 @click.option('--skip-ids-file', type=click.Path(exists=True), help='Path to file containing IDs to skip (one per line)')
@@ -279,28 +503,29 @@ class TranslationComparer:
     help='Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.',
 )
 @click.option('--rejudge', is_flag=True, help='Ignore existing judgments and redo all pairs.')
-def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
-    """Compare translations between different models using a third LLM as analyzer.
+def main(task, judge_profile, base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
+    """Judge pairwise task outputs with a configured LLM judge.
 
-    Reads the translation pairs from the JSONL file, creates a dataset,
-    and uses an LLM to analyze the differences. Saves the analysis results
-    to a new JSONL file.
+    Reads pair records from JSONL, asks the configured judge to choose a
+    winner, and writes the resulting judgment JSONL.
     """
     script_dir = Path(__file__).resolve().parent
+    task_config = load_task_config(task)
+    judge_profile_config = load_judge_profile(judge_profile)
 
     if not test_model and not generate_base_set:
         raise click.UsageError(
-            "Either --test-model-name or --generate-base-set must be specified"
+            "Either --test-model or --generate-base-set must be specified"
         )
     if test_model and generate_base_set:
         raise click.UsageError(
-            "Cannot specify both --test-model-name and --generate-base-set"
+            "Cannot specify both --test-model and --generate-base-set"
         )
 
     # Validate that prompt file exists
-    prompt_path = script_dir / "prompts" / "compare_prompt.txt"
+    prompt_path = resolve_compare_prompt_path(task_config, judge_profile_config)
     if not prompt_path.exists():
-        raise SystemExit("Error: Missing prompts/compare_prompt.txt. See README for setup.")
+        raise SystemExit(f"Error: Missing compare prompt file: {prompt_path}. See README for setup.")
 
     snapshot_dir = Path(os.getenv("BASESET_SNAPSHOT_DIR", "baseset/v1.0"))
     base_version = snapshot_dir.name
@@ -312,18 +537,31 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
             input_file = (Path.cwd() / input_file).resolve()
     else:
         if generate_base_set:
-            input_file = script_dir / "base_conversation_pairs.jsonl"
+            canonical_snapshot_pairs = snapshot_dir / f"base_conversation_pairs.{base_version}.jsonl"
+            generic_snapshot_pairs = snapshot_dir / "base_conversation_pairs.jsonl"
+            if canonical_snapshot_pairs.exists():
+                input_file = canonical_snapshot_pairs
+            else:
+                input_file = generic_snapshot_pairs
         else:
-            safe_test_model = test_model.replace("/", "__")
-            safe_judge = judge_model.replace("/", "__")
-            input_file = script_dir / "results" / base_version / safe_test_model / safe_judge / "pairs.jsonl"
+            pair_candidates = resolve_result_file_candidates(
+                base_version,
+                test_model,
+                judge_model,
+                "pairs.jsonl",
+                judge_profile_id=judge_profile_config.profile_id,
+                root=script_dir,
+            )
+            input_file = next((path for path in pair_candidates if path.exists()), pair_candidates[0])
     if not input_file.exists():
         raise SystemExit(f"Error: Input file not found: {input_file}. Please run generate_shootout_data.py first.")
 
     translation_pairs = []
     with input_file.open("r", encoding="utf-8") as f:
         for line in f:
-            translation_pairs.append(json.loads(line))
+            pair = ensure_pair_contract_metadata(json.loads(line))
+            validate_pair_record(pair)
+            translation_pairs.append(pair)
 
     # Validate that test model exists in the data when not generating base set
     if not generate_base_set:
@@ -337,21 +575,21 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         if safe_test_model_name not in llm_a_models:
             raise ValueError(f"Model '{safe_test_model_name}' not found in llm_a position in {input_file}. Available llm_a models: {sorted(llm_a_models)}")
 
-    # Randomize positions to account for position bias
-    random.seed(42)  # Set seed for reproducibility
+    # Deterministically swap half of pairs to account for position bias without depending on file order.
     for pair in translation_pairs:
-        if random.random() < 0.5:
-            # Swap positions
-            pair["llm_a"], pair["llm_b"] = pair["llm_b"], pair["llm_a"]
-            # Update formatted_data to reflect the swap
-            lines = pair["formatted_data"].split('\n')
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-                if stripped == "## Translation A":
-                    lines[i] = line.replace("## Translation A", "## Translation B")
-                elif stripped == "## Translation B":
-                    lines[i] = line.replace("## Translation B", "## Translation A")
-            pair["formatted_data"] = '\n'.join(lines)
+        if should_swap_pair(pair):
+            swap_translation_pair_sides(pair)
+        pair["pair_fingerprint"] = compute_pair_fingerprint(pair)
+        pair.update(
+            annotate_pair_for_judging(
+                pair,
+                judge_model=judge_model,
+                judge_profile_id=judge_profile_config.profile_id,
+                compare_prompt_profile_id=judge_profile_config.compare_prompt_profile,
+                parser_id=judge_profile_config.parser_id,
+                snapshot_version=base_version,
+            )
+        )
 
     # Filter out pairs with IDs in skip_ids or skip_ids_file
     skip_id_set = set()
@@ -371,74 +609,113 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
             print(f"Skipping {filtered_count:,} already-processed items (out of {original_count:,} total)")
 
     # Default output path (per model/judge)
+    legacy_output_path = None
     if generate_base_set:
         safe_judge_model = judge_model.replace("/", "__")
         output_dir = script_dir / snapshot_dir
-        output_path = output_dir / f"base_set.{safe_judge_model}.jsonl"
+        legacy_output_path = output_dir / f"base_set.{safe_judge_model}.jsonl"
+        if is_legacy_jp_v1_snapshot(snapshot_dir):
+            output_path = schema_v2_path(legacy_output_path)
+        else:
+            output_path = legacy_output_path
     else:
-        safe_test_model = test_model.replace("/", "__")
-        safe_judge_model = judge_model.replace("/", "__")
-        output_dir = script_dir / "results" / base_version / safe_test_model / safe_judge_model
+        output_dir = candidate_results_dir(
+            base_version,
+            test_model,
+            judge_model,
+            judge_profile_id=judge_profile_config.profile_id,
+            root=script_dir,
+        )
         output_path = output_dir / "judgments.jsonl"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load existing judgments if reusing
     existing_by_id = {}
     existing_order = []
-    if output_path.exists() and not rejudge:
-        with output_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                pid = item.get("id")
-                if not pid:
-                    continue
-                if pid not in existing_by_id:
-                    existing_order.append(pid)
-                existing_by_id[pid] = item
+    reuse_sources = [output_path]
+    if generate_base_set and legacy_output_path is not None and legacy_output_path != output_path:
+        reuse_sources = [legacy_output_path, output_path]
+    elif not generate_base_set:
+        reuse_sources = resolve_result_file_candidates(
+            base_version,
+            test_model,
+            judge_model,
+            "judgments.jsonl",
+            judge_profile_id=judge_profile_config.profile_id,
+            root=script_dir,
+        )
+
+    if not rejudge:
+        for reuse_source in reuse_sources:
+            if not reuse_source.exists():
+                continue
+            with reuse_source.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    pid = item.get("id")
+                    if not pid:
+                        continue
+                    if pid not in existing_by_id:
+                        existing_order.append(pid)
+                    existing_by_id[pid] = item
         if existing_by_id:
-            print(f"Reusing {len(existing_by_id):,} existing judgments from {output_path}")
+            print(f"Loaded {len(existing_by_id):,} reusable judgments from {len([p for p in reuse_sources if p.exists()]):,} source file(s)")
 
     # Determine pending pairs (not yet judged or forced rejudge)
     pending_pairs = []
     for pair in translation_pairs:
         pid = pair.get("id")
-        if not rejudge and pid in existing_by_id:
+        existing = existing_by_id.get(pid)
+        if not rejudge and existing_judgment_matches_pair(existing, pair):
+            existing_by_id[pid] = normalize_reused_judgment(existing, pair)
             continue
         pending_pairs.append(pair)
 
-    # Create dataset and shuffle it
-    translations = Dataset.from_list(pending_pairs)
-    translations = translations.shuffle(seed=42)  # Set seed for reproducibility
+    successful_results = []
+    results = []
+    failed_items = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+    if pending_pairs:
+        # Create dataset and shuffle it
+        translations = Dataset.from_list(pending_pairs)
+        translations = translations.shuffle(seed=42)  # Set seed for reproducibility
 
-    api_key = os.getenv(api_key_env)
-    if not api_key:
-        raise SystemExit(f"Error: Missing API key. Set {api_key_env} in your environment.")
+        api_key = os.getenv(api_key_env)
+        if not api_key:
+            raise SystemExit(f"Error: Missing API key. Set {api_key_env} in your environment.")
 
-    if gemini_judge:
-        print(f"Using native Gemini API for judging with model: {judge_model}")
-        if not GEMINI_AVAILABLE:
-            raise click.UsageError(
-                "google-genai is required for --gemini-judge. Install with: pip install google-genai"
-            )
+        if gemini_judge:
+            print(f"Using native Gemini API for judging with model: {judge_model}")
+            if not GEMINI_AVAILABLE:
+                raise click.UsageError(
+                    "google-genai is required for --gemini-judge. Install with: pip install google-genai"
+                )
+        else:
+            print(f"Using OpenAI-compatible API at {base_url} with model: {judge_model}")
+
+        comparer = TranslationComparer(
+            model_name=judge_model,
+            base_url=base_url,
+            api_key=api_key,
+            concurrency_limit=concurrency_limit,
+            prompt_path=prompt_path,
+            use_gemini=gemini_judge,
+            judge_request_settings=judge_profile_config.resolve_request_settings(judge_model),
+        )
+
+        results = comparer(translations, max_workers=max_workers)
+
+        # Filter out None results from failed items
+        successful_results = [item for item in results if item is not None]
+        failed_items = comparer.failed_items
+        total_input_tokens = comparer.total_input_tokens
+        total_output_tokens = comparer.total_output_tokens
     else:
-        print(f"Using OpenAI-compatible API at {base_url} with model: {judge_model}")
-
-    comparer = TranslationComparer(
-        model_name=judge_model,
-        base_url=base_url,
-        api_key=api_key,
-        concurrency_limit=concurrency_limit,
-        prompt_path=prompt_path,
-        use_gemini=gemini_judge,
-    )
-
-    results = comparer(translations, max_workers=max_workers)
-
-    # Filter out None results from failed items
-    successful_results = [item for item in results if item is not None]
+        print("All pairs satisfied by existing judgments; no judge requests needed.")
 
     if existing_by_id:
         print(f"Merging {len(successful_results):,} new results with existing file: {output_path}")
@@ -476,18 +753,18 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
     print(f"Pairs after skips: {expected_count}")
     print(f"Newly attempted: {len(results)}")
     print(f"Successful new: {len(successful_results)}")
-    print(f"Failed new: {len(comparer.failed_items)}")
+    print(f"Failed new: {len(failed_items)}")
     print(f"Total judged entries now: {judged_count}")
     
-    if comparer.failed_items:
+    if failed_items:
         print(f"\nFailed items:")
-        for failed in comparer.failed_items:
+        for failed in failed_items:
             print(f"  - {failed['name']} (ID: {failed['id']}): {failed['error']}")
 
     print(f"\nToken Usage Summary:")
-    print(f"Input tokens: {comparer.total_input_tokens:,}")
-    print(f"Output tokens: {comparer.total_output_tokens:,}")
-    print(f"Total tokens: {comparer.total_input_tokens + comparer.total_output_tokens:,}")
+    print(f"Input tokens: {total_input_tokens:,}")
+    print(f"Output tokens: {total_output_tokens:,}")
+    print(f"Total tokens: {total_input_tokens + total_output_tokens:,}")
 
 if __name__ == "__main__":
     main()
