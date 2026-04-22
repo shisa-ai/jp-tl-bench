@@ -18,6 +18,7 @@ DATASET_REPO_NAME = "shisa-ai/bt_translation_set_global"
 DATASET_CONFIGS = (
     "translation_ja_en_bidirectional_v1",
     "translation_zh_en_bidirectional_v1",
+    "translation_zh_ja_bidirectional_v1",
 )
 REQUIRED_COLUMNS = ("item_id", "name", "text", "difficulty", "language", "metadata")
 EXPECTED_COUNTS = {
@@ -30,6 +31,11 @@ EXPECTED_COUNTS = {
         "rows": 67,
         "languages": {"en": 34, "zh": 33},
         "difficulties": {"easy": 27, "hard": 40},
+    },
+    "translation_zh_ja_bidirectional_v1": {
+        "rows": 69,
+        "languages": {"ja": 36, "zh": 33},
+        "difficulties": {"easy": 27, "hard": 42},
     },
 }
 HEADER_KEY_MAP = {
@@ -260,6 +266,15 @@ def build_zh_rows(
     return sorted(en_rows + zh_rows, key=lambda row: row["item_id"])
 
 
+def build_zh_ja_rows(ja_rows: Iterable[dict], zh_rows: Iterable[dict]) -> list[dict]:
+    rows = [
+        dict(row)
+        for row in [*ja_rows, *zh_rows]
+        if row["language"] in {"ja", "zh"}
+    ]
+    return sorted(rows, key=lambda row: row["item_id"])
+
+
 def _write_jsonl(path: Path, rows: Iterable[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -293,6 +308,10 @@ configs:
   data_files:
   - split: train
     path: data/translation_zh_en_bidirectional_v1/train.jsonl
+- config_name: translation_zh_ja_bidirectional_v1
+  data_files:
+  - split: train
+    path: data/translation_zh_ja_bidirectional_v1/train.jsonl
 ---
 
 # bt_translation_set_global
@@ -303,6 +322,7 @@ Private benchmark dataset export for the task configs in this repository.
 
 - `translation_ja_en_bidirectional_v1`: migrated version of `shisa-ai/bt_translation_test`
 - `translation_zh_en_bidirectional_v1`: shared English-source rows plus the curated Chinese-source benchmark set
+- `translation_zh_ja_bidirectional_v1`: existing Japanese-source rows plus the curated Chinese-source benchmark set
 
 ## Row Schema
 
@@ -344,6 +364,10 @@ configs:
   data_files:
   - split: train
     path: data/translation_zh_en_bidirectional_v1/train.jsonl
+- config_name: translation_zh_ja_bidirectional_v1
+  data_files:
+  - split: train
+    path: data/translation_zh_ja_bidirectional_v1/train.jsonl
 ---
 
 # bt_translation_set_global
@@ -354,6 +378,7 @@ Private benchmark dataset export for the task configs in this repository.
 
 - `translation_ja_en_bidirectional_v1`: immutable JP v1 export with `{direction_counts.get("EN->JA", 0) + direction_counts.get("JA->EN", 0)}` rows
 - `translation_zh_en_bidirectional_v1`: bidirectional ZH/EN export with `{len(manifest_rows)}` curated Chinese-source rows and shared English-source rows
+- `translation_zh_ja_bidirectional_v1`: bidirectional ZH/JA export reusing the curated Chinese-source rows and existing Japanese-source rows
 
 ## Source Provenance
 
@@ -410,6 +435,7 @@ def build_translation_set_global(
         cn_slot_to_file=cn_slot_to_file,
         cn_difficulties=cn_difficulties,
     )
+    zh_ja_rows = build_zh_ja_rows(ja_rows, zh_rows)
 
     readme_path = output_root / "README.md"
     readme_path.parent.mkdir(parents=True, exist_ok=True)
@@ -420,13 +446,16 @@ def build_translation_set_global(
 
     ja_path = output_root / "data" / "translation_ja_en_bidirectional_v1" / "train.jsonl"
     zh_path = output_root / "data" / "translation_zh_en_bidirectional_v1" / "train.jsonl"
+    zh_ja_path = output_root / "data" / "translation_zh_ja_bidirectional_v1" / "train.jsonl"
     _write_jsonl(ja_path, ja_rows)
     _write_jsonl(zh_path, zh_rows)
+    _write_jsonl(zh_ja_path, zh_ja_rows)
 
     return {
         "readme": readme_path,
         "translation_ja_en_bidirectional_v1": ja_path,
         "translation_zh_en_bidirectional_v1": zh_path,
+        "translation_zh_ja_bidirectional_v1": zh_ja_path,
     }
 
 
@@ -638,7 +667,7 @@ def _validate_rows(rows: list[dict], *, config_name: str) -> None:
 
 
 def _validate_manifest_rows(rows: list[dict], *, dataset_rows: list[dict], config_name: str) -> None:
-    if config_name != "translation_zh_en_bidirectional_v1":
+    if config_name not in {"translation_zh_en_bidirectional_v1", "translation_zh_ja_bidirectional_v1"}:
         return
 
     manifest_by_id = {row["item_id"]: row for row in rows}

@@ -1,0 +1,110 @@
+[
+  {
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-0.5B-Instruct",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-1.5B-Instruct",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen2.5-3B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-3B-Instruct",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen3.5-4B",
+    "safe_name": "Qwen__Qwen3.5-4B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-7B-Instruct",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "tencent/HY-MT1.5-7B",
+    "safe_name": "tencent__HY-MT1.5-7B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen3.5-9B",
+    "safe_name": "Qwen__Qwen3.5-9B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "zai-org/GLM-4-9B-0414",
+    "safe_name": "zai-org__GLM-4-9B-0414",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "zai-org/GLM-Z1-9B-0414",
+    "safe_name": "zai-org__GLM-Z1-9B-0414",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen2.5-14B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-14B-Instruct",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen3.5-27B",
+    "safe_name": "Qwen__Qwen3.5-27B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+    "safe_name": "Qwen__Qwen3-30B-A3B-Instruct-2507",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+    "safe_name": "deepseek-ai__DeepSeek-R1-Distill-Qwen-32B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "zai-org/GLM-4-32B-0414",
+    "safe_name": "zai-org__GLM-4-32B-0414",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/Qwen3.5-35B-A3B",
+    "safe_name": "Qwen__Qwen3.5-35B-A3B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "Qwen/QwQ-32B",
+    "safe_name": "Qwen__QwQ-32B",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "zai-org/GLM-Z1-32B-0414",
+    "safe_name": "zai-org__GLM-Z1-32B-0414",
+    "matches": 1173,
+    "unique_opponents": 17
+  },
+  {
+    "model": "zai-org/GLM-4.7-Flash",
+    "safe_name": "zai-org__GLM-4.7-Flash",
+    "matches": 1173,
+    "unique_opponents": 17
+  }
+]

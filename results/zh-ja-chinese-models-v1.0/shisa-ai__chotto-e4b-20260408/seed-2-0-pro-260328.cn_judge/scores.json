@@ -1,0 +1,68 @@
+{
+  "model": "shisa-ai/chotto-e4b-20260408",
+  "judge_model": "seed-2-0-pro-260328",
+  "baseset_version": "zh-ja-chinese-models-v1.0",
+  "pairs_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/pairs.jsonl",
+  "judgments_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/judgments.jsonl",
+  "timestamp_utc": "2026-04-22T07:27:42.665836Z",
+  "expected_pairs": 1242,
+  "judged_pairs": 1242,
+  "missing_pairs": 0,
+  "base_comparisons": 10557,
+  "task_id": "translation.zh-ja",
+  "task_type": "translation",
+  "task_version": "v1",
+  "task_config_digest": "sha256:d72624c5cd5cfdf43a0a55d99ed84f1dfec9667dbaab553168ee7e9a2d8f4851",
+  "zh_ja": {
+    "overall": {
+      "difficulty": "all",
+      "language": "zh_ja",
+      "lt": 9.182326935815492,
+      "wins": 502,
+      "total": 594,
+      "win_rate": 0.8451178451178452
+    },
+    "easy": {
+      "difficulty": "easy",
+      "language": "zh_ja",
+      "lt": 9.544376977020928,
+      "wins": 193,
+      "total": 216,
+      "win_rate": 0.8935185185185185
+    },
+    "hard": {
+      "difficulty": "hard",
+      "language": "zh_ja",
+      "lt": 8.954453723811556,
+      "wins": 309,
+      "total": 378,
+      "win_rate": 0.8174603174603174
+    }
+  },
+  "ja_zh": {
+    "overall": {
+      "difficulty": "all",
+      "language": "ja_zh",
+      "lt": 7.397911390187192,
+      "wins": 416,
+      "total": 648,
+      "win_rate": 0.6419753086419753
+    },
+    "easy": {
+      "difficulty": "easy",
+      "language": "ja_zh",
+      "lt": 7.741860385483327,
+      "wins": 182,
+      "total": 270,
+      "win_rate": 0.674074074074074
+    },
+    "hard": {
+      "difficulty": "hard",
+      "language": "ja_zh",
+      "lt": 7.240120040278155,
+      "wins": 234,
+      "total": 378,
+      "win_rate": 0.6190476190476191
+    }
+  }
+}

@@ -26,6 +26,7 @@ This writes:
 
 - `hf_datasets/bt_translation_set_global/data/translation_ja_en_bidirectional_v1/train.jsonl`
 - `hf_datasets/bt_translation_set_global/data/translation_zh_en_bidirectional_v1/train.jsonl`
+- `hf_datasets/bt_translation_set_global/data/translation_zh_ja_bidirectional_v1/train.jsonl`
 - `hf_datasets/bt_translation_set_global/README.md`
 - `docs/chinese_source_manifest.csv`
 - `docs/translation_set_inventory.csv`
@@ -37,6 +38,7 @@ Validate each task config against the exported folder before any push:
 ```bash
 mamba run -n shisa-jp-tl-bench python scripts/validate_hf_dataset.py --task benchmark_tasks/translation_ja_en_bidirectional_v1.yaml
 mamba run -n shisa-jp-tl-bench python scripts/validate_hf_dataset.py --task benchmark_tasks/translation_zh_en_bidirectional_v1.yaml
+mamba run -n shisa-jp-tl-bench python scripts/validate_hf_dataset.py --task benchmark_tasks/translation_zh_ja_bidirectional_v1.yaml
 ```
 
 The validator checks:
@@ -77,9 +79,9 @@ After a successful publish, resolve the returned dataset commit SHA and replace 
 
 The current checked-in release is locked to:
 
-- `1b0d3bcb2ed1a611ad9130cc474007afae2b598c`
+- `ead55791383dd96468692a8883b88af865416845`
 
-Both `translation_ja_en_bidirectional_v1.yaml` and `translation_zh_en_bidirectional_v1.yaml` now point to that commit.
+The released task configs now point to that commit.
 
 ## Ownership Boundary
 

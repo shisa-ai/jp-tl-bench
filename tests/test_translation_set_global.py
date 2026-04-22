@@ -105,11 +105,14 @@ def test_build_translation_set_global_writes_both_task_configs(tmp_path):
 
     jp_file = tmp_path / "hf_datasets" / "bt_translation_set_global" / "data" / "translation_ja_en_bidirectional_v1" / "train.jsonl"
     zh_file = tmp_path / "hf_datasets" / "bt_translation_set_global" / "data" / "translation_zh_en_bidirectional_v1" / "train.jsonl"
+    zh_ja_file = tmp_path / "hf_datasets" / "bt_translation_set_global" / "data" / "translation_zh_ja_bidirectional_v1" / "train.jsonl"
     assert jp_file.exists()
     assert zh_file.exists()
+    assert zh_ja_file.exists()
 
     jp_rows = [json.loads(line) for line in jp_file.read_text(encoding="utf-8").splitlines()]
     zh_rows = [json.loads(line) for line in zh_file.read_text(encoding="utf-8").splitlines()]
+    zh_ja_rows = [json.loads(line) for line in zh_ja_file.read_text(encoding="utf-8").splitlines()]
 
     assert jp_rows == [
         {
@@ -136,6 +139,34 @@ def test_build_translation_set_global_writes_both_task_configs(tmp_path):
             "text": "Hello",
             "difficulty": "easy",
             "language": "en",
+            "metadata": "NA",
+        },
+        {
+            "item_id": "zh_01",
+            "name": "zh_01",
+            "text": "中文正文。",
+            "difficulty": "hard",
+            "language": "zh",
+            "metadata": json.dumps(
+                {
+                    "title": "中文条目",
+                    "original_url": "https://example.com/cn",
+                    "http_status": "200",
+                    "extraction_method": "cleaned",
+                    "source_file": "01_cn.txt",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        },
+    ]
+    assert zh_ja_rows == [
+        {
+            "item_id": "ja_item_1",
+            "name": "ja_item_1",
+            "text": "こんにちは",
+            "difficulty": "hard",
+            "language": "ja",
             "metadata": "NA",
         },
         {

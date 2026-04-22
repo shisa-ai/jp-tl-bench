@@ -11,16 +11,19 @@ from tqdm import tqdm
 import concurrent.futures
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 import urllib.error
 import urllib.parse
 import urllib.request
+import yaml
 
 from benchmark_tasks import load_task_config, resolve_dataset_ref
 
 load_dotenv()
 
 FAILED_TRANSLATION_PREFIX = "[TRANSLATION FAILED:"
+DEFAULT_GENERATION_CONFIG_PATH = "model_generation_profiles.yaml"
 
 REASONING_BLOCK_PATTERNS = (
     re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE),
@@ -57,6 +60,7 @@ class GenerationAdapter:
     frequency_penalty: Optional[float] = None
     reasoning_effort: Optional[str] = None
     prompt_file: Optional[str] = None  # Override prompt file path (relative to project root)
+    extra_body: Optional[dict] = None
 
     def build_request(self, *, model_name: str, prompt_text: str, max_tokens: int | None) -> dict:
         params = {
@@ -73,12 +77,60 @@ class GenerationAdapter:
             params["reasoning_effort"] = self.reasoning_effort
         if max_tokens is not None:
             params["max_tokens"] = max_tokens
+        if self.extra_body is not None:
+            params["extra_body"] = self.extra_body
         return params
 
 
-def resolve_generation_adapter(model_name: str) -> GenerationAdapter:
+def _adapter_from_settings(settings: dict[str, Any]) -> GenerationAdapter:
+    known_fields = {
+        "profile_id",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "reasoning_effort",
+        "prompt_file",
+        "extra_body",
+    }
+    unknown_fields = sorted(set(settings) - known_fields)
+    if unknown_fields:
+        raise ValueError(f"Unknown generation adapter settings: {', '.join(unknown_fields)}")
+    return GenerationAdapter(**settings)
+
+
+def load_generation_adapter_config(config_path: str | os.PathLike[str] | None) -> list[dict[str, Any]]:
+    """Load model-specific generation overrides from a YAML config file."""
+    if not config_path:
+        return []
+
+    path = Path(config_path)
+    if not path.exists():
+        return []
+
+    with path.open("r", encoding="utf-8") as handle:
+        payload = yaml.safe_load(handle) or {}
+
+    overrides = payload.get("model_overrides", [])
+    if not isinstance(overrides, list):
+        raise ValueError(f"Generation config {path} must define model_overrides as a list")
+    return overrides
+
+
+def resolve_generation_adapter(
+    model_name: str,
+    generation_overrides: Optional[list[dict[str, Any]]] = None,
+) -> GenerationAdapter:
     """Map model quirks to a reusable generation adapter."""
     model_lower = model_name.lower()
+    for override in generation_overrides or []:
+        contains = override.get("contains")
+        if not contains:
+            continue
+        needles = contains if isinstance(contains, list) else [contains]
+        if any(str(needle).lower() in model_lower for needle in needles):
+            settings = dict(override.get("settings", {}))
+            settings.setdefault("profile_id", override.get("profile_id", str(needles[0])))
+            return _adapter_from_settings(settings)
 
     if "claude-opus-4-1" in model_lower:
         return GenerationAdapter(
@@ -136,6 +188,7 @@ class Translator:
         ultra_low_context: bool = False,
         concurrency_limit: int = 5,
         max_tokens: int = 8192,
+        generation_config_path: str | os.PathLike[str] | None = DEFAULT_GENERATION_CONFIG_PATH,
     ):
         self.model_name = model_name
         self.task_config = task_config or load_task_config()
@@ -154,9 +207,11 @@ class Translator:
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
         self.max_tokens = max_tokens
         self._tokenize_supported: Optional[bool] = None
+        self.generation_config_path = generation_config_path
+        self.generation_overrides = load_generation_adapter_config(generation_config_path)
 
     def get_generation_adapter(self) -> GenerationAdapter:
-        return resolve_generation_adapter(self.model_name)
+        return resolve_generation_adapter(self.model_name, self.generation_overrides)
 
     def get_prompt_path(self, source_language: str, target_language: str) -> str:
         """Determine the task-configured prompt file for the active direction and context setting."""
@@ -451,13 +506,39 @@ class Translator:
 @click.option('--concurrency-limit', default=5, help='Max number of concurrent API requests.')
 @click.option('--api-key-env', default='OPENAI_API_KEY', help='Env var name that holds the API key')
 @click.option('--max-tokens', default=8192, show_default=True, help='Maximum completion tokens per translation.')
-def main(task, base_url, test_model, low_context, ultra_low_context, max_workers, concurrency_limit, api_key_env, max_tokens):
+@click.option(
+    '--output-dir',
+    default='translations',
+    show_default=True,
+    type=click.Path(path_type=Path),
+    help='Directory where the model JSONL artifact will be written.',
+)
+@click.option(
+    '--generation-config',
+    envvar='GENERATION_CONFIG',
+    default=DEFAULT_GENERATION_CONFIG_PATH,
+    show_default=True,
+    help='YAML file with model-specific generation profiles and prompt overrides.',
+)
+def main(
+    task,
+    base_url,
+    test_model,
+    low_context,
+    ultra_low_context,
+    max_workers,
+    concurrency_limit,
+    api_key_env,
+    max_tokens,
+    output_dir,
+    generation_config,
+):
     """Translate text using the specified model.
 
     Loads the translation task set from the configured Hugging Face dataset,
     translates the source texts, and saves the results to a JSONL file.
     """
-    os.makedirs("translations", exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     task_config = load_task_config(task)
     hf_token = None
     if task_config.dataset.hf_token_env:
@@ -501,14 +582,15 @@ def main(task, base_url, test_model, low_context, ultra_low_context, max_workers
         ultra_low_context=ultra_low_context,
         concurrency_limit=concurrency_limit,
         max_tokens=max_tokens,
+        generation_config_path=generation_config,
     )
 
     results = translator(normalized_dataset, max_workers=max_workers)
     
     safe_model_name = test_model.replace("/", "__")
-    output_path = os.path.join("translations", f"{safe_model_name}.jsonl")
+    output_path = output_dir / f"{safe_model_name}.jsonl"
     
-    with open(output_path, "w", encoding="utf-8") as f:
+    with output_path.open("w", encoding="utf-8") as f:
         for item in results:
             try:
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")

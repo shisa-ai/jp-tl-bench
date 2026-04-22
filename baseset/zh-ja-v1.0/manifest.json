@@ -1,0 +1,44 @@
+{
+  "snapshot_version": "zh-ja-v1.0",
+  "description": "Chinese-Japanese bidirectional base set built from Qwen and Hunyuan MT runs.",
+  "task_id": "translation.zh-ja",
+  "task_type": "translation",
+  "task_version": "v1",
+  "dataset_repo": "shisa-ai/bt_translation_set_global",
+  "dataset_config": "translation_zh_ja_bidirectional_v1",
+  "dataset_split": "train",
+  "dataset_revision": "ead55791383dd96468692a8883b88af865416845",
+  "models": [
+    {
+      "model": "Qwen/Qwen2.5-0.5B-Instruct",
+      "artifact": "translations/Qwen__Qwen2.5-0.5B-Instruct.jsonl",
+      "source_artifact": "translations/translation_zh_ja_bidirectional_v1/Qwen__Qwen2.5-0.5B-Instruct.jsonl"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "artifact": "translations/Qwen__Qwen2.5-1.5B-Instruct.jsonl",
+      "source_artifact": "translations/translation_zh_ja_bidirectional_v1/Qwen__Qwen2.5-1.5B-Instruct.jsonl"
+    },
+    {
+      "model": "Qwen/Qwen2.5-3B-Instruct",
+      "artifact": "translations/Qwen__Qwen2.5-3B-Instruct.jsonl",
+      "source_artifact": "translations/translation_zh_ja_bidirectional_v1/Qwen__Qwen2.5-3B-Instruct.jsonl"
+    },
+    {
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "artifact": "translations/Qwen__Qwen2.5-7B-Instruct.jsonl",
+      "source_artifact": "translations/translation_zh_ja_bidirectional_v1/Qwen__Qwen2.5-7B-Instruct.jsonl"
+    },
+    {
+      "model": "Qwen/Qwen3.5-4B",
+      "artifact": "translations/Qwen__Qwen3.5-4B.jsonl",
+      "source_artifact": "translations/translation_zh_ja_bidirectional_v1/Qwen__Qwen3.5-4B.jsonl"
+    },
+    {
+      "model": "tencent/Hunyuan-MT-7B",
+      "artifact": "translations/tencent__Hunyuan-MT-7B.jsonl",
+      "source_artifact": "translations/translation_zh_ja_bidirectional_v1/tencent__Hunyuan-MT-7B.jsonl"
+    }
+  ],
+  "task_config_digest": "sha256:d72624c5cd5cfdf43a0a55d99ed84f1dfec9667dbaab553168ee7e9a2d8f4851"
+}

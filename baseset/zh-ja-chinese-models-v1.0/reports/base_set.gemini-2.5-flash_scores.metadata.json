@@ -1,0 +1,16 @@
+{
+  "snapshot_version": "zh-ja-chinese-models-v1.0",
+  "task_id": "translation.zh-ja",
+  "task_type": "translation",
+  "task_version": "v1",
+  "task_config_digest": "sha256:d72624c5cd5cfdf43a0a55d99ed84f1dfec9667dbaab553168ee7e9a2d8f4851",
+  "dataset_repo": "shisa-ai/bt_translation_set_global",
+  "dataset_config": "translation_zh_ja_bidirectional_v1",
+  "dataset_split": "train",
+  "dataset_revision": "ead55791383dd96468692a8883b88af865416845",
+  "judge_model": "gemini-2.5-flash",
+  "report_file": "base_set.gemini-2.5-flash_scores.json",
+  "pair_file": "base_conversation_pairs.zh-ja-chinese-models-v1.0.jsonl",
+  "analysis_file": "base_set.gemini-2.5-flash.jsonl",
+  "manifest_file": "manifest.json"
+}

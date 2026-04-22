@@ -1,0 +1,23 @@
+{
+  "task_id": "translation.zh-ja",
+  "task_type": "translation",
+  "task_version": "v1",
+  "task_config_digest": "sha256:d72624c5cd5cfdf43a0a55d99ed84f1dfec9667dbaab553168ee7e9a2d8f4851",
+  "dataset_ref": {
+    "repo": "shisa-ai/bt_translation_set_global",
+    "config": "translation_zh_ja_bidirectional_v1",
+    "split": "train",
+    "revision": "ead55791383dd96468692a8883b88af865416845"
+  },
+  "generation_profile_id": null,
+  "judge_profile_id": "cn_judge",
+  "compare_prompt_profile_id": "compare-cn-v1",
+  "judge_parser_id": "answer-parser/v1",
+  "judge_contract_id": "seed-2-0-pro-260328::compare-cn-v1::answer-parser/v1",
+  "pair_id_schema": "v1",
+  "snapshot_version": "zh-ja-chinese-models-v1.0",
+  "translation_file": null,
+  "judgments_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/judgments.jsonl",
+  "pairs_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/pairs.jsonl",
+  "score_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/scores.json"
+}

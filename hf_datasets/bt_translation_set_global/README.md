@@ -8,6 +8,10 @@ configs:
   data_files:
   - split: train
     path: data/translation_zh_en_bidirectional_v1/train.jsonl
+- config_name: translation_zh_ja_bidirectional_v1
+  data_files:
+  - split: train
+    path: data/translation_zh_ja_bidirectional_v1/train.jsonl
 ---
 
 # bt_translation_set_global
@@ -18,6 +22,7 @@ Private benchmark dataset export for the task configs in this repository.
 
 - `translation_ja_en_bidirectional_v1`: immutable JP v1 export with `70` rows
 - `translation_zh_en_bidirectional_v1`: bidirectional ZH/EN export with `33` curated Chinese-source rows and shared English-source rows
+- `translation_zh_ja_bidirectional_v1`: bidirectional ZH/JA export reusing the curated Chinese-source rows and existing Japanese-source rows
 
 ## Source Provenance
 

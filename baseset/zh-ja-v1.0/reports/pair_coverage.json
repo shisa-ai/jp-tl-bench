@@ -1,0 +1,38 @@
+[
+  {
+    "model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-0.5B-Instruct",
+    "matches": 345,
+    "unique_opponents": 5
+  },
+  {
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-1.5B-Instruct",
+    "matches": 345,
+    "unique_opponents": 5
+  },
+  {
+    "model": "Qwen/Qwen2.5-3B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-3B-Instruct",
+    "matches": 345,
+    "unique_opponents": 5
+  },
+  {
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "safe_name": "Qwen__Qwen2.5-7B-Instruct",
+    "matches": 345,
+    "unique_opponents": 5
+  },
+  {
+    "model": "Qwen/Qwen3.5-4B",
+    "safe_name": "Qwen__Qwen3.5-4B",
+    "matches": 345,
+    "unique_opponents": 5
+  },
+  {
+    "model": "tencent/Hunyuan-MT-7B",
+    "safe_name": "tencent__Hunyuan-MT-7B",
+    "matches": 345,
+    "unique_opponents": 5
+  }
+]

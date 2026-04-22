@@ -1,0 +1,81 @@
+# Chinese Translation Worklog
+
+## 2026-04-21
+
+- Checked repo status before edits. Branch was `cn-refactor`; `AGENTS.md` already had local modifications.
+- Confirmed no repo-specific mamba env existed initially. Existing envs were `base`, `sglang`, and `vllm`.
+- Created the documented project env `shisa-jp-tl-bench` with Python 3.12.
+- Installed `requirements.txt` into `shisa-jp-tl-bench`.
+- Verified core imports in `shisa-jp-tl-bench`.
+- Confirmed `vllm` env has vLLM `0.19.1`.
+- Confirmed the Chinese task config `translation_zh_en_bidirectional_v1` loads 67 rows from `shisa-ai/bt_translation_set_global` at revision `1b0d3bcb2ed1a611ad9130cc474007afae2b598c`.
+- Started `tencent/Hunyuan-MT-7B` through vLLM on `127.0.0.1:8000` with `--max-model-len 12288`, `--max-num-seqs 20`, and `--gpu-memory-utilization 0.90`.
+- Generated Chinese task translations with:
+  `HF_TOKEN="$(mamba run -n shisa-jp-tl-bench python -c 'from huggingface_hub import get_token; print(get_token() or "")')" OPENAI_API_KEY=dummy mamba run -n shisa-jp-tl-bench python generate_translation_data.py --task translation_zh_en_bidirectional_v1 --base-url http://127.0.0.1:8000/v1 --test-model tencent/Hunyuan-MT-7B --api-key-env OPENAI_API_KEY --max-workers 10 --concurrency-limit 10 --max-tokens 8192`
+- Wrote `translations/tencent__Hunyuan-MT-7B.jsonl` with 67 rows: 66 `ok`, 1 `failed`.
+- The failed row is `zh_32`; its default prompt was 35,448 Hunyuan tokens, exceeding the 12,288-token server limit.
+- Checked low-context and ultra-low-context prompts for `zh_32`; they were still about 35.4k Hunyuan tokens, above the model's native 32,768-token position limit.
+- Tried a focused `zh_32` repair with vLLM `VLLM_ALLOW_LONG_MAX_MODEL_LEN=1` and `--max-model-len 40960`; vLLM hit a CUDA device-side assert after positions exceeded 32,768, so the failed row was left unchanged instead of masking the runtime/model limit.
+- Shut down vLLM and confirmed port `8000` was free and GPU memory was released.
+- Counted rows over the proposed 3,500-character cap. There were 18 total over cap, but only 8 Chinese rows: `zh_05`, `zh_21`, `zh_23`, `zh_25`, `zh_29`, `zh_30`, `zh_31`, and `zh_32`.
+- Trimmed those 8 Chinese source files in `docs/cn_texts/` to paragraph boundaries below 3,500 characters.
+- Rebuilt `hf_datasets/bt_translation_set_global` and `docs/chinese_source_manifest.csv` from the trimmed source files.
+- Verified the Chinese dataset has 33 Chinese rows, max Chinese row length 3,490 characters, and zero Chinese rows over 3,500 characters. English rows over 3,500 were intentionally left unchanged.
+- Started a Qwen/Qwen3.5-4B vLLM rerun and found the default Chinese prompt caused visible reasoning and runaway formatting in many outputs.
+- Added `model_generation_profiles.yaml` so model-specific generation behavior can be configured outside Python.
+- Moved the Qwen/Qwen3.5 no-thinking vLLM setting into that config via `extra_body.chat_template_kwargs.enable_thinking: false`.
+- Routed Qwen/Qwen3.5 through `prompts/translate_prompt_simple.txt` after the normal Chinese prompt still produced translator notes and other formatting in some rows.
+- Added support for `--generation-config` / `GENERATION_CONFIG` in `generate_translation_data.py`, preserving built-in defaults when no YAML override matches.
+- Reran Qwen/Qwen3.5-4B with the configured no-thinking simple-prompt profile against vLLM on `127.0.0.1:8000`.
+- Wrote `translations/Qwen__Qwen3.5-4B.jsonl` with 67 rows: 65 `ok`, 2 `failed`.
+- The failed rows were `zh_23` and `zh_32`; both exceeded the 12,288-token server budget with the currently loaded remote dataset rows.
+- Sampled successful Qwen outputs looked like direct translations after switching to the simple prompt; the earlier obvious reasoning/notes artifact on `zh_31` was gone.
+- Stopped the Qwen vLLM server after the rerun.
+- Confirmed the local Chinese export had 33 Chinese rows, max Chinese source length 3,490 characters, and zero Chinese rows over 3,500 characters.
+- Uploaded the smaller local export to `shisa-ai/bt_translation_set_global` at Hub commit `f9fc8742eb63f46b1142a478b9d7688e64517338`.
+- Updated the JP and ZH task configs to lock their dataset revision to `f9fc8742eb63f46b1142a478b9d7688e64517338`.
+- Added a Hunyuan MT generation profile using `prompts/translate_prompt_hunyuan_mt.txt`, matching the requested prompt: `把下面的文本翻译成{{tgt_lang}}，不要额外解释。`
+- Ran `tencent/Hunyuan-MT-7B` with the `hunyuan-mt-simple` profile against the locked smaller dataset revision.
+- Final full-cap run used `--max-tokens 4096`, `--max-workers 10`, and `--concurrency-limit 10`; it wrote `translations/tencent__Hunyuan-MT-7B.jsonl` with 67 `ok` rows and 0 failures.
+- Confirmed the run consumed the smaller Chinese rows from the uploaded dataset: max Chinese source length was 3,490 characters and no Chinese source rows exceeded 3,500 characters.
+- Some Hunyuan zh->en outputs still show model-side repetition/looping, but the full test now runs without context or infrastructure failures.
+- Ran five Qwen Chinese-task translation jobs in parallel on separate GPUs/ports against dataset revision `f9fc8742eb63f46b1142a478b9d7688e64517338`: `Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen2.5-1.5B-Instruct`, `Qwen/Qwen2.5-3B-Instruct`, `Qwen/Qwen3.5-4B`, and `Qwen/Qwen2.5-7B-Instruct`.
+- Each Qwen run used `--max-tokens 4096`, `--max-workers 10`, and `--concurrency-limit 10`, with one vLLM server per GPU.
+- Wrote all five `translations/Qwen__*.jsonl` artifacts with 67 rows and 0 failed rows each.
+- Confirmed every Qwen artifact consumed the smaller Chinese rows: max Chinese source length was 3,490 characters and no Chinese rows exceeded 3,500 characters.
+- The 0.5B artifact contains several empty translations and many missing translation tags; treated as model output quality rather than infrastructure failure.
+- Added `translation_zh_ja_bidirectional_v1` as a third dataset/task config reusing existing Japanese-source rows and curated Chinese-source rows, with no new source data.
+- Rebuilt and uploaded `shisa-ai/bt_translation_set_global` with the new ZH/JA config at Hub commit `ead55791383dd96468692a8883b88af865416845`.
+- Locked JP/EN, ZH/EN, and ZH/JA task configs to `ead55791383dd96468692a8883b88af865416845`.
+- Validated remote ZH/JA config: 69 rows total, 36 Japanese-source rows, 33 Chinese-source rows, max Chinese source length 3,490 characters, and zero Chinese rows over 3,500 characters.
+- Ran ZH/JA generation in parallel for five Qwen models plus `tencent/Hunyuan-MT-7B`, writing artifacts under `translations/translation_zh_ja_bidirectional_v1/`.
+- All six ZH/JA artifacts completed with 69 `ok` rows and 0 failed rows. The `Qwen2.5-0.5B-Instruct` artifact had one empty translation and one very long output, treated as model behavior.
+- Created `baseset/zh-ja-v1.0` from the six completed ZH/JA artifacts and generated 1,035 anchor-vs-anchor pairwise comparisons.
+- Judged the ZH/JA base set with `gemini-2.5-flash` and `cn_judge` at 50 workers. Added a concise Chinese judge prompt instruction and a 120s OpenAI-client timeout after the uncapped/native runs stalled or omitted answer tags.
+- Repaired 5 pathological base-set rows with compacted Gemini prompts where repeated model output caused empty/null responses. Final base set has 1,035 judged rows, 0 missing answer tags, and scores under `baseset/zh-ja-v1.0/reports/`.
+- Generated `shisa-ai/chotto-e4b-20260408` ZH/JA translations under `translations/translation_zh_ja_bidirectional_v1/` with 69 `ok` rows and 0 failures.
+- Judged `shisa-ai/chotto-e4b-20260408` against `zh-ja-v1.0` with `gemini-2.5-flash` and `cn_judge`: 414 expected pairs, 414 judged pairs, 0 missing pairs. Repaired 8 pathological rows with compacted Gemini prompts.
+- Chotto score summary against the ZH/JA base set: 368 wins / 414 comparisons overall (88.89%); ZH->JA 191/198 (96.46%, LT 9.68); JA->ZH 177/216 (81.94%, LT 9.10).
+
+## 2026-04-22
+
+- Read `docs/chinese_models.txt` and used it as the requested expanded Chinese/Japanese base-model list.
+- Added generation profiles for the newer Chinese-list models in `model_generation_profiles.yaml`: Hunyuan MT simple prompt matching both `tencent/Hunyuan-MT-7B` and `tencent/HY-MT1.5-7B`, no-thinking simple prompts for QwQ/DeepSeek-R1/GLM-Z1, GLM simple prompts, and Hunyuan-A13B simple prompts.
+- Ran the Chinese-list models for `translation_zh_ja_bidirectional_v1` and copied successful artifacts into `baseset/zh-ja-chinese-models-v1.0/translations/`.
+- Completed 18 of 19 listed models with 69 `ok` rows and 0 failed rows each. `tencent/Hunyuan-A13B-Instruct` was excluded: TP2 and TP4 failed during MoE weight allocation with CUDA OOM, and TP8 held memory across all GPUs but did not progress through checkpoint loading before being killed.
+- TP map from the successful runs: TP1 worked for Qwen 0.5B/1.5B/3B/3.5-4B/2.5-7B, `tencent/HY-MT1.5-7B`, `Qwen/Qwen3.5-9B`, and the 9B GLM/GLM-Z1 models; TP2 was required for `Qwen/Qwen2.5-14B-Instruct`; TP4 with 8k context was used for Qwen3.5-27B, Qwen3-30B-A3B, QwQ-32B, DeepSeek-R1-Distill-Qwen-32B, GLM-4-32B, GLM-Z1-32B, GLM-4.7-Flash, and Qwen3.5-35B-A3B.
+- Created `baseset/zh-ja-chinese-models-v1.0` with 18 anchor models and 10,557 anchor-vs-anchor pairs.
+- Judged the expanded base set with `gemini-2.5-flash` using `cn_judge`. Final base judgment file has 10,553 rows; the scorer skipped 16 pathological/missing-answer pairs and wrote reports under `baseset/zh-ja-chinese-models-v1.0/reports/`.
+- Judged `shisa-ai/chotto-e4b-20260408` against `zh-ja-chinese-models-v1.0`: 1,242 expected pairs, 1,223 scored pairs after 19 missing/skipped judgments, with outputs under `results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/gemini-2.5-flash.cn_judge/`.
+- Chotto score summary against the expanded Chinese-list base: ZH->JA LT 9.00, 488/576 wins, 84.72% win rate; JA->ZH LT 7.21, 411/647 wins, 63.52% win rate.
+- Visualizer command for this run: `mamba run -n shisa-jp-tl-bench python score_visualizer.py --path results --baseset-version zh-ja-chinese-models-v1.0 --task translation_zh_ja_bidirectional_v1 --judge gemini-2.5-flash`.
+- Investigated unexpectedly low GLM scores and found prompt/output-shape contamination, especially `zai-org/GLM-4.7-Flash`, whose prior artifact contained English analysis/planning text instead of direct translations on many rows.
+- Updated the GLM generation profile to `glm-strict-no-thinking`, using the strict no-extra-explanation prompt in `prompts/translate_prompt_hunyuan_mt.txt` plus `extra_body.chat_template_kwargs.enable_thinking: false`.
+- Reran the five GLM-family artifacts for `translation_zh_ja_bidirectional_v1`: GLM-4-9B, GLM-Z1-9B, GLM-4-32B, GLM-Z1-32B, and GLM-4.7-Flash. All completed with 69 `ok` rows and 0 failures.
+- Refreshed the GLM files inside `baseset/zh-ja-chinese-models-v1.0/translations/`, regenerated the base pair file, and rejudged GLM-involved base comparisons only where possible. Non-GLM pairs were skipped; 5,169 refreshed GLM judgments were merged, with 6 GLM pairs still missing due Gemini empty/null responses.
+- Rescored the refreshed base. `zai-org/GLM-4.7-Flash` improved substantially: ZH->JA LT 7.32 / 65.8% and JA->ZH LT 5.95 / 53.8%. `zai-org/GLM-Z1-32B-0414` scored ZH->JA LT 5.12 / 49.6% and JA->ZH LT 6.21 / 55.6%.
+- Reran `shisa-ai/chotto-e4b-20260408` judgments against the refreshed base. The comparer reused existing non-changed judgments and attempted 358 changed/missing pairs; 343 succeeded and 15 failed, mostly pathological `zh_01` Gemini null responses.
+- Refreshed chotto score summary against the GLM-rerun base: ZH->JA LT 9.17, 494/577 wins, 85.62% win rate; JA->ZH LT 7.55, 429/647 wins, 66.31% win rate.
+- Checked `Qwen/Qwen3.5-35B-A3B` for artifact weirdness: 69 `ok` rows, no analysis leakage, no preambles, no mojibake markers, no suspicious wrong-language heuristic hits, and no very-long runaway outputs.
+- Compared chotto's refreshed judgments against `Qwen/Qwen3.5-35B-A3B` by common opponent/item/direction. The apparent chotto-over-Qwen35 score edge is only in ZH->JA: chotto had 59 common-opponent wins where Qwen35 lost, versus 37 Qwen35-only wins. In JA->ZH the pattern reverses strongly: 32 chotto-only wins versus 132 Qwen35-only wins.
+- Main ZH->JA anchors driving chotto's relative lift over Qwen35 were `zai-org/GLM-Z1-32B-0414` (+18.2 percentage points), `Qwen/Qwen3.5-27B` (+13.7), `zai-org/GLM-4-32B-0414` (+12.1), and `Qwen/QwQ-32B` (+11.4). Qwen35 still beats chotto directly: 15/32 chotto wins in ZH->JA, 10/36 in JA->ZH, 25/68 combined.

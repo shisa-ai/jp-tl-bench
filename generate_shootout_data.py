@@ -131,11 +131,11 @@ def generate_translation_pairs(
     judge_model=None,
     judge_profile_id: str = "default",
     task=None,
+    translations_dir: str = "translations",
 ):
     """Generate translation pairs comparing target file against all other models."""
     task_config = load_task_config(task)
     base_translations_dir = os.path.join(BASESET_SNAPSHOT_DIR, "translations")
-    translations_dir = "translations"
     snapshot_version = os.path.basename(os.path.normpath(BASESET_SNAPSHOT_DIR))
     if output_path:
         output_file = output_path
@@ -291,13 +291,19 @@ def generate_translation_pairs(
 @click.option('--output', help='Optional output path for pairs file (default per-model results path when --test-model).')
 @click.option('--judge-model', help='Optional judge name for embedding in default results path.')
 @click.option(
+    '--translations-dir',
+    default=os.getenv("TRANSLATIONS_DIR", "translations"),
+    show_default=True,
+    help='Directory containing the candidate model translation JSONL files.',
+)
+@click.option(
     '--judge-profile',
     envvar='JUDGE_PROFILE',
     default='default',
     show_default=True,
     help='Judge profile path or name under judge_profiles/. Used to scope the default results path.',
 )
-def main(task, test_model, generate_base, yes, output, judge_model, judge_profile):
+def main(task, test_model, generate_base, yes, output, judge_model, translations_dir, judge_profile):
     """Generate conversation pairs for evaluation."""
     judge_profile_config = load_judge_profile(judge_profile)
     if generate_base:
@@ -315,6 +321,7 @@ def main(task, test_model, generate_base, yes, output, judge_model, judge_profil
             judge_model=judge_model,
             judge_profile_id=judge_profile_config.profile_id,
             task=task,
+            translations_dir=translations_dir,
         )
 
 if __name__ == "__main__":

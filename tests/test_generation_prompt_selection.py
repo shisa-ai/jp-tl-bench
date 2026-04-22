@@ -6,7 +6,11 @@ import pytest
 import yaml
 
 from benchmark_tasks import load_task_config
-from generate_translation_data import Translator, main as generate_translation_data_cli
+from generate_translation_data import (
+    Translator,
+    main as generate_translation_data_cli,
+    resolve_generation_adapter,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +79,75 @@ def test_translator_supports_generic_direction_prompt_with_language_placeholders
     assert "English" in prompt_text
     assert "{{src_lang}}" not in prompt_text
     assert "{{tgt_lang}}" not in prompt_text
+
+
+def test_generation_config_can_disable_qwen_thinking_and_set_prompt(tmp_path):
+    config_path = tmp_path / "generation_profiles.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "model_overrides": [
+                    {
+                        "profile_id": "qwen-no-thinking-test",
+                        "contains": ["Qwen/Qwen3.5", "Qwen3.5"],
+                        "settings": {
+                            "temperature": 0.0,
+                            "top_p": None,
+                            "prompt_file": "prompts/translate_prompt_simple.txt",
+                            "extra_body": {
+                                "chat_template_kwargs": {
+                                    "enable_thinking": False,
+                                }
+                            },
+                        },
+                    }
+                ]
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    task = load_task_config(ZH_TASK_PATH)
+    translator = Translator(
+        model_name="Qwen/Qwen3.5-4B",
+        base_url="https://example.com/v1",
+        api_key="test-key",
+        task_config=task,
+        generation_config_path=config_path,
+    )
+
+    adapter = translator.get_generation_adapter()
+    prompt_text, prompt_path = translator.get_prompt(
+        {
+            "item_id": "zh_01",
+            "source_text": "你好，世界。",
+            "difficulty": "easy",
+            "source_language": "zh",
+            "target_language": "en",
+        }
+    )
+    request = adapter.build_request(
+        model_name="Qwen/Qwen3.5-4B",
+        prompt_text=prompt_text,
+        max_tokens=512,
+    )
+
+    assert adapter.profile_id == "qwen-no-thinking-test"
+    assert adapter.temperature == 0.0
+    assert adapter.top_p is None
+    assert Path(prompt_path).name == "translate_prompt_simple.txt"
+    assert request["extra_body"] == {
+        "chat_template_kwargs": {
+            "enable_thinking": False,
+        }
+    }
+
+
+def test_builtin_generation_defaults_still_cover_gpt5_without_config():
+    adapter = resolve_generation_adapter("openai/gpt-5")
+
+    assert adapter.profile_id == "gpt-5"
+    assert adapter.reasoning_effort == "minimal"
 
 
 def test_generate_translation_data_cli_fails_fast_when_api_key_is_missing(monkeypatch, tmp_path):

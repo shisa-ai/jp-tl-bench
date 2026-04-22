@@ -8,7 +8,7 @@ dataset:
   repo: shisa-ai/bt_translation_set_global
   config: translation_ja_en_bidirectional_v1
   split: train
-  revision: 1b0d3bcb2ed1a611ad9130cc474007afae2b598c
+  revision: ead55791383dd96468692a8883b88af865416845
   hf_token_env: HF_TOKEN
 compatibility:
   name_alias_mode: legacy_passthrough

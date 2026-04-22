@@ -59,6 +59,7 @@ def main(output_root: Path, manifest_path: Path, inventory_path: Path) -> None:
     for task in (
         Path("benchmark_tasks/translation_ja_en_bidirectional_v1.yaml"),
         Path("benchmark_tasks/translation_zh_en_bidirectional_v1.yaml"),
+        Path("benchmark_tasks/translation_zh_ja_bidirectional_v1.yaml"),
     ):
         counts = validate_translation_set_global(
             output_root,

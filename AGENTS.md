@@ -1,6 +1,8 @@
 # JP-TL-Bench Agent Guide
 
 This repository is an evaluation workspace for pairwise, model-judged language tasks. The current implementation is translation-focused, but agents should treat language pair, judge, prompt shape, and scoring details as configurable unless a task explicitly says otherwise.
+## Logging your work.
+Put what you do in a worklog that matches your task. For instance, if you are doing chinese factoring, put it in china_refactor_worklog.md.
 
 ## Summary
 

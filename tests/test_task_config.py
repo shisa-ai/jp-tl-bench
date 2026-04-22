@@ -18,6 +18,7 @@ from generate_translation_data import Translator, main as generate_translation_d
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JP_TASK_PATH = REPO_ROOT / "benchmark_tasks" / "translation_ja_en_bidirectional_v1.yaml"
 ZH_TASK_PATH = REPO_ROOT / "benchmark_tasks" / "translation_zh_en_bidirectional_v1.yaml"
+ZH_JA_TASK_PATH = REPO_ROOT / "benchmark_tasks" / "translation_zh_ja_bidirectional_v1.yaml"
 DEFAULT_JUDGE_PROFILE_PATH = REPO_ROOT / "judge_profiles" / "default.yaml"
 CN_JUDGE_PROFILE_PATH = REPO_ROOT / "judge_profiles" / "cn_judge.yaml"
 
@@ -36,6 +37,17 @@ def test_load_task_and_judge_config_resolve_compare_prompt_profiles():
     )
     assert resolve_compare_prompt_path(zh_task, default_judge).name == "default.txt"
     assert resolve_compare_prompt_path(zh_task, cn_judge).name == "cn.txt"
+
+
+def test_zh_ja_task_reuses_generic_translation_prompt():
+    task = load_task_config(ZH_JA_TASK_PATH)
+
+    assert task.dataset.config == "translation_zh_ja_bidirectional_v1"
+    assert [direction.key for direction in task.directions] == ["zh_ja", "ja_zh"]
+    assert task.get_prompt_path("zh", "ja").name == "default.txt"
+    assert task.get_prompt_path("ja", "zh").name == "default.txt"
+    assert task.get_language_name("zh") == "Chinese"
+    assert task.get_language_name("ja") == "Japanese"
 
 
 def test_judge_profile_resolves_request_overrides_by_model_name():
@@ -165,6 +177,7 @@ def test_generate_translation_data_cli_loads_private_task_dataset_with_hf_token(
             max_tokens,
             task_config,
             dataset_ref,
+            generation_config_path=None,
         ):
             captured["translator"] = {
                 "model_name": model_name,
