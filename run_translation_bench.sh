@@ -11,6 +11,7 @@ ULTRA_LOW_CONTEXT="${ULTRA_LOW_CONTEXT:-false}"
 OPENAI_URL="${OPENAI_URL:-}"
 JUDGE_URL="${JUDGE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}"
 JUDGE_MODEL="${JUDGE_MODEL:-gemini-2.5-flash}"
+JUDGE_TRANSPORT="${JUDGE_TRANSPORT:-openai}"
 MODEL_API_KEY_ENV="${MODEL_API_KEY_ENV:-OPENAI_API_KEY}"
 JUDGE_API_KEY_ENV="${JUDGE_API_KEY_ENV:-GEMINI_API_KEY}"
 BASESET_SNAPSHOT_DIR="${BASESET_SNAPSHOT_DIR:-baseset/v1.0}"
@@ -29,7 +30,7 @@ fi
 # Validate required arguments
 if [ -z "$MODEL" ] || [ -z "$OPENAI_URL" ] || [ -z "$TASK_CONFIG" ]; then
     echo "Error: Required environment variables are missing"
-    echo "Usage: TASK_CONFIG=<task_name_or_yaml> MODEL=<model_name> OPENAI_URL=<api_url> [JUDGE_URL=<judge_url>] [JUDGE_PROFILE=<judge_profile>] [LOW_CONTEXT=true] [ULTRA_LOW_CONTEXT=true] [JUDGE_MODEL=model_name] [MODEL_API_KEY_ENV=MY_KEY_VAR] [JUDGE_API_KEY_ENV=MY_JUDGE_KEY_VAR] [BENCH_ENV_NAME=shisa-jp-tl-bench] ./$0"
+    echo "Usage: TASK_CONFIG=<task_name_or_yaml> MODEL=<model_name> OPENAI_URL=<api_url> [JUDGE_URL=<judge_url>] [JUDGE_TRANSPORT=openai|gemini|skylark] [JUDGE_PROFILE=<judge_profile>] [LOW_CONTEXT=true] [ULTRA_LOW_CONTEXT=true] [JUDGE_MODEL=model_name] [MODEL_API_KEY_ENV=MY_KEY_VAR] [JUDGE_API_KEY_ENV=MY_JUDGE_KEY_VAR] [BENCH_ENV_NAME=shisa-jp-tl-bench] ./$0"
     echo "Example:"
     echo "  TASK_CONFIG=translation_ja_en_bidirectional_v1 MODEL=mistral OPENAI_URL=http://localhost:8000/v1 ./$0"
     exit 1
@@ -53,6 +54,7 @@ fi
 log "Starting eval script"
 log "Task config: $TASK_CONFIG"
 log "Judge profile: $JUDGE_PROFILE"
+log "Judge transport: $JUDGE_TRANSPORT"
 log "Environment: $BENCH_ENV_NAME (via $CONDA_COMMAND run -n)"
 
 # Build arguments for translation generation
@@ -73,7 +75,22 @@ fi
 log "Successfully generated task outputs. Generating comparison pairs..."
 "$CONDA_COMMAND" run -n "$BENCH_ENV_NAME" python generate_shootout_data.py --task "$TASK_CONFIG" --judge-profile "$JUDGE_PROFILE" --test-model "$MODEL" --judge-model "$JUDGE_MODEL"
 log "Successfully generated comparison pairs. Judging pairs..."
-"$CONDA_COMMAND" run -n "$BENCH_ENV_NAME" python translation_comparer_any_model.py --task "$TASK_CONFIG" --judge-profile "$JUDGE_PROFILE" --base-url "$JUDGE_URL" --judge-model "$JUDGE_MODEL" --test-model "$MODEL" --api-key-env "$JUDGE_API_KEY_ENV"
+JUDGE_ARGS=(--task "$TASK_CONFIG" --judge-profile "$JUDGE_PROFILE" --base-url "$JUDGE_URL" --judge-model "$JUDGE_MODEL" --test-model "$MODEL" --api-key-env "$JUDGE_API_KEY_ENV")
+case "$JUDGE_TRANSPORT" in
+    openai)
+        ;;
+    gemini)
+        JUDGE_ARGS+=(--gemini-judge)
+        ;;
+    skylark)
+        JUDGE_ARGS+=(--skylark-judge)
+        ;;
+    *)
+        echo "Error: Unsupported JUDGE_TRANSPORT '$JUDGE_TRANSPORT' (expected openai, gemini, or skylark)"
+        exit 1
+        ;;
+esac
+"$CONDA_COMMAND" run -n "$BENCH_ENV_NAME" python translation_comparer_any_model.py "${JUDGE_ARGS[@]}"
 log "Successfully judged pairs. Running Bradley-Terry scoring..."
 "$CONDA_COMMAND" run -n "$BENCH_ENV_NAME" python choix_analyzer.py --task "$TASK_CONFIG" --judge-profile "$JUDGE_PROFILE" --test-model "$MODEL" --judge-model "$JUDGE_MODEL"
 log "All done! Scores saved under results/$(basename ${BASESET_SNAPSHOT_DIR:-baseset/v1.0})/$SAFE_MODEL_NAME/$JUDGE_RESULT_DIR/"

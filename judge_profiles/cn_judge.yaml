@@ -3,7 +3,12 @@ compare_prompt_profile: compare-cn-v1
 parser_id: answer-parser/v1
 request_defaults:
   temperature: 0.0
+  max_tokens: 4096
 model_request_overrides:
+  - contains: seed-2-0
+    settings:
+      thinking:
+        type: disabled
   - contains: gemini-2.5-pro
     settings:
       reasoning_effort: low

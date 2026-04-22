@@ -72,6 +72,7 @@ API keys are managed using a `.env` file. Create a `.env` file in the root of th
 ```
 OPENAI_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 GEMINI_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+BYTEPLUS_TOKEN="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 MY_CUSTOM_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
@@ -106,6 +107,22 @@ JUDGE_URL="http://shisa-v2-405b/v1" \
 ./run_translation_bench.sh
 ```
 Runtime depends on both your generation and judging concurrency/speeds, but we find most runs take between 15-30 minutes and the average cost for a run using `gemini-2.5-flash` as a judge is around $7 (USD). 
+
+### Skylark Judge Example
+
+Skylark/Seed judges use BytePlus Ark's Responses endpoint instead of chat completions:
+
+```bash
+TASK_CONFIG="translation_zh_en_bidirectional_v1" \
+JUDGE_PROFILE="cn_judge" \
+MODEL="shisa-ai/shisa-v2.1-qwen3-8b" \
+OPENAI_URL="http://localhost:8000/v1" \
+JUDGE_MODEL="seed-2-0-pro-260328" \
+JUDGE_TRANSPORT="skylark" \
+JUDGE_URL="https://ark.ap-southeast.bytepluses.com/api/v3/responses" \
+JUDGE_API_KEY_ENV="BYTEPLUS_TOKEN" \
+./run_translation_bench.sh
+```
 
 ### Chinese Task Example
 
@@ -145,6 +162,7 @@ JUDGE_API_KEY_ENV="GEMINI_API_KEY" \
 -   `OPENAI_URL`: (Required) The API base URL for your test model.
 -   `JUDGE_MODEL`: The name of the judge model. Defaults to `gemini-2.5-flash`.
 -   `JUDGE_URL`: The API base URL for the judge model. Defaults to the Google Generative Language API.
+-   `JUDGE_TRANSPORT`: Judge API transport. Use `openai` for chat-completions-compatible APIs, `gemini` for the native Gemini API, or `skylark` for BytePlus Ark Responses. Defaults to `openai`.
 -   `JUDGE_PROFILE`: Judge profile path or name under `judge_profiles/`. Defaults to `default`; use `cn_judge` for the first Chinese release.
 -   `MODEL_API_KEY_ENV`: The name of the environment variable holding the API key for your test model. Defaults to `OPENAI_API_KEY`.
 -   `JUDGE_API_KEY_ENV`: The name of the environment variable holding the API key for the judge model. Defaults to `GEMINI_API_KEY`.
@@ -214,6 +232,7 @@ mamba run -n shisa-jp-tl-bench python generate_translation_data.py --task <task_
 - `--ultra-low-context`: Use prompts optimized for very small context windows (4096 tokens)
 - `--max-workers`: Number of worker threads for translation (default: 5)
 - `--concurrency-limit`: Maximum number of concurrent API requests (default: 5)
+- `--generation-config`: YAML file for model-specific generation profiles, request kwargs, and prompt overrides (default: `model_generation_profiles.yaml`; can also be set with `GENERATION_CONFIG`)
 
 **Example:**
 
@@ -225,6 +244,7 @@ This will generate translation data using Google's Gemini model and save the res
 
 Task configs live under `benchmark_tasks/` and now control the dataset repo/config/revision, supported directions, translation prompt templates, and available compare-prompt profiles. The checked-in configs currently target the private dataset repo `shisa-ai/bt_translation_set_global`, so you will need `HF_TOKEN` set before generation runs can load the task items.
 Generated translation artifacts now record both the configured dataset revision and the resolved immutable Hub commit SHA in `dataset_ref`, so downstream runs remain attributable even when the task config started from a temporary publish label.
+Model-specific generation behavior is configured in `model_generation_profiles.yaml`. Use it for provider/model quirks such as disabling Qwen thinking mode via `extra_body.chat_template_kwargs.enable_thinking: false`, setting `reasoning_effort`, changing sampling defaults, or routing a model to a custom prompt file.
 Judge prompt selection is now config-driven as well: `translation_comparer_any_model.py` can load a task config plus a judge profile, and the resulting judgment rows carry `judge_profile_id`, `compare_prompt_profile_id`, and `judge_contract_id` for reuse safety.
 
 For the JP legacy boundary, additive result sidecars, and the first Chinese release plan, see [docs/migration-jp-v1-to-task-config.md](docs/migration-jp-v1-to-task-config.md).
@@ -245,6 +265,7 @@ Task content now lives in the private Hugging Face dataset repo `shisa-ai/bt_tra
 
 - `translation_ja_en_bidirectional_v1`
 - `translation_zh_en_bidirectional_v1`
+- `translation_zh_ja_bidirectional_v1`
 
 Rebuild the local export plus provenance docs with:
 

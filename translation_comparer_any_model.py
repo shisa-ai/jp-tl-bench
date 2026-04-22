@@ -4,6 +4,8 @@ import os
 import json
 import random
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from datasets import Dataset
 from openai import OpenAI
@@ -251,6 +253,119 @@ class OpenAIJudgeAdapter:
         )
 
 
+class SkylarkResponsesJudgeAdapter:
+    RESPONSE_UNSUPPORTED_REQUEST_SETTINGS = {"thinking_budget", "reasoning_effort"}
+
+    def __init__(
+        self,
+        model_name: str,
+        endpoint_url: str,
+        api_key: str,
+        request_settings: dict | None = None,
+    ):
+        self.model_name = model_name
+        self.endpoint_url = endpoint_url.rstrip("/") or endpoint_url
+        self.api_key = api_key
+        self.request_settings = dict(request_settings or {})
+
+    def request(self, client, prompt_text: str) -> JudgeResponse:
+        payload = {
+            "model": self.model_name,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt_text}],
+                }
+            ],
+        }
+        for key, value in self.request_settings.items():
+            if value is None or key in self.RESPONSE_UNSUPPORTED_REQUEST_SETTINGS:
+                continue
+            if key == "max_tokens":
+                payload["max_output_tokens"] = value
+            else:
+                payload[key] = value
+
+        judge_generation_config = {
+            key: value for key, value in payload.items() if key != "input"
+        }
+
+        body = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            self.endpoint_url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "ark-beta-mcp": "true",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                response_body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise ValueError(f"Skylark API HTTP {exc.code}: {detail}") from exc
+
+        response_json = self._parse_response_body(
+            response_body,
+            stream=bool(payload.get("stream")),
+        )
+        response_text = self._extract_response_text(response_json)
+        if not response_text:
+            raise ValueError("Empty response from Skylark API")
+
+        usage = response_json.get("usage") or {}
+        return JudgeResponse(
+            text=response_text,
+            generation_config=judge_generation_config,
+            input_tokens=usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0,
+            output_tokens=usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0,
+        )
+
+    @staticmethod
+    def _parse_response_body(response_body: str, stream: bool = False) -> dict:
+        if not stream:
+            return json.loads(response_body)
+
+        text_parts = []
+        final_response = {}
+        for line in response_body.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line.removeprefix("data:").strip()
+            if not data or data == "[DONE]":
+                continue
+            event = json.loads(data)
+            if isinstance(event.get("delta"), str):
+                text_parts.append(event["delta"])
+            if event.get("type") in {"response.completed", "response.done"}:
+                final_response = event.get("response") or final_response
+
+        if final_response:
+            if text_parts and "output_text" not in final_response:
+                final_response["output_text"] = "".join(text_parts)
+            return final_response
+        return {"output_text": "".join(text_parts)}
+
+    @staticmethod
+    def _extract_response_text(response_json: dict) -> str:
+        output_text = response_json.get("output_text")
+        if isinstance(output_text, str):
+            return output_text
+
+        text_parts = []
+        for output_item in response_json.get("output", []) or []:
+            for content_item in output_item.get("content", []) or []:
+                text = content_item.get("text")
+                if isinstance(text, str):
+                    text_parts.append(text)
+        return "".join(text_parts)
+
+
 class GeminiJudgeAdapter:
     def __init__(self, model_name: str, safety_settings: list, request_settings: dict | None = None):
         self.model_name = model_name
@@ -313,16 +428,21 @@ class TranslationComparer:
         concurrency_limit: int,
         prompt_path: Path,
         use_gemini: bool = False,
+        use_skylark: bool = False,
         judge_request_settings: dict | None = None,
     ):
         self.model_name = model_name
         self.use_gemini = use_gemini
+        self.use_skylark = use_skylark
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.failed_items = []
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
         self.prompt_path = prompt_path
         self.judge_request_settings = dict(judge_request_settings or {})
+
+        if use_gemini and use_skylark:
+            raise ValueError("Only one native judge transport can be selected")
 
         if use_gemini:
             if not GEMINI_AVAILABLE:
@@ -348,10 +468,20 @@ class TranslationComparer:
                 self.safety_settings,
                 request_settings=self.judge_request_settings,
             )
+        elif use_skylark:
+            self.client = None
+            self.adapter = SkylarkResponsesJudgeAdapter(
+                model_name,
+                base_url,
+                api_key,
+                request_settings=self.judge_request_settings,
+            )
         else:
             self.client = OpenAI(
                 base_url=base_url,
                 api_key=api_key,
+                timeout=120.0,
+                max_retries=0,
             )
             self.adapter = OpenAIJudgeAdapter(
                 model_name,
@@ -502,8 +632,14 @@ class TranslationComparer:
     show_default=True,
     help='Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.',
 )
+@click.option(
+    '--skylark-judge/--no-skylark-judge',
+    default=False,
+    show_default=True,
+    help='Use BytePlus Ark Responses API for Skylark/Seed judges instead of OpenAI-compatible chat completions.',
+)
 @click.option('--rejudge', is_flag=True, help='Ignore existing judgments and redo all pairs.')
-def main(task, judge_profile, base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
+def main(task, judge_profile, base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, skylark_judge, rejudge):
     """Judge pairwise task outputs with a configured LLM judge.
 
     Reads pair records from JSONL, asks the configured judge to choose a
@@ -520,6 +656,10 @@ def main(task, judge_profile, base_url, judge_model, test_model, generate_base_s
     if test_model and generate_base_set:
         raise click.UsageError(
             "Cannot specify both --test-model and --generate-base-set"
+        )
+    if gemini_judge and skylark_judge:
+        raise click.UsageError(
+            "Cannot specify both --gemini-judge and --skylark-judge"
         )
 
     # Validate that prompt file exists
@@ -694,6 +834,8 @@ def main(task, judge_profile, base_url, judge_model, test_model, generate_base_s
                 raise click.UsageError(
                     "google-genai is required for --gemini-judge. Install with: pip install google-genai"
                 )
+        elif skylark_judge:
+            print(f"Using BytePlus Ark Responses API at {base_url} with model: {judge_model}")
         else:
             print(f"Using OpenAI-compatible API at {base_url} with model: {judge_model}")
 
@@ -704,6 +846,7 @@ def main(task, judge_profile, base_url, judge_model, test_model, generate_base_s
             concurrency_limit=concurrency_limit,
             prompt_path=prompt_path,
             use_gemini=gemini_judge,
+            use_skylark=skylark_judge,
             judge_request_settings=judge_profile_config.resolve_request_settings(judge_model),
         )
 

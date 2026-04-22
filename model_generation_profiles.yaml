@@ -1,0 +1,94 @@
+# Model-specific generation profiles for generate_translation_data.py.
+#
+# Each override matches when `contains` is present in --test-model. Later generic
+# built-in defaults still apply when no configured override matches.
+model_overrides:
+  - profile_id: byteplus-seed2-simple-no-thinking
+    contains:
+      - seed-2-0-mini
+      - seed-2-0-lite
+      - seed-2-0-pro
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt
+      extra_body:
+        thinking:
+          type: disabled
+
+  - profile_id: byteplus-deepseek-v3-simple
+    contains: deepseek-v3-2
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt
+
+  - profile_id: byteplus-glm-simple-no-thinking
+    contains: glm-4-7
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+  - profile_id: hunyuan-mt-simple
+    contains:
+      - tencent/Hunyuan-MT-7B
+      - tencent/HY-MT1.5-7B
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_hunyuan_mt.txt
+
+  - profile_id: qwen3.5-no-thinking
+    contains:
+      - Qwen/Qwen3.5
+      - Qwen3.5
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+  - profile_id: reasoning-simple-no-thinking
+    contains:
+      - Qwen/QwQ
+      - DeepSeek-R1
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+  - profile_id: glm-strict-no-thinking
+    contains:
+      - zai-org/GLM-4
+      - zai-org/GLM-4.7
+      - zai-org/GLM-Z1
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_hunyuan_mt.txt
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+  - profile_id: hunyuan-simple
+    contains: tencent/Hunyuan-A13B-Instruct
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt
+
+  - profile_id: cat-translate-simple
+    contains: cat-translate
+    settings:
+      temperature: 0.1
+      top_p: 0.85
+      prompt_file: prompts/translate_prompt_simple.txt

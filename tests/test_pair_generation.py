@@ -5,10 +5,12 @@ import pytest
 from click.testing import CliRunner
 
 import generate_shootout_data
+import translation_comparer_any_model
 from generate_shootout_data import generate_translation_pairs
 from pair_contract import compute_pair_fingerprint, compute_pair_id_v1
 from translation_comparer_any_model import (
     OpenAIJudgeAdapter,
+    SkylarkResponsesJudgeAdapter,
     TranslationComparer,
     existing_judgment_matches_pair,
     main as compare_cli,
@@ -304,4 +306,85 @@ def test_openai_judge_adapter_omits_gemini_native_only_request_settings():
         "model": "gemini-2.5-flash",
         "temperature": 0.0,
         "reasoning_effort": "low",
+    }
+
+
+def test_skylark_responses_adapter_posts_responses_payload(monkeypatch):
+    captured = {}
+
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        @staticmethod
+        def read():
+            return json.dumps(
+                {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "<answer>A</answer>",
+                                }
+                            ]
+                        }
+                    ],
+                    "usage": {"input_tokens": 11, "output_tokens": 3},
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    monkeypatch.setattr(
+        translation_comparer_any_model.urllib.request,
+        "urlopen",
+        fake_urlopen,
+    )
+
+    adapter = SkylarkResponsesJudgeAdapter(
+        "seed-2-0-pro-260328",
+        "https://ark.ap-southeast.bytepluses.com/api/v3/responses",
+        "test-key",
+        request_settings={
+            "temperature": 0.0,
+            "max_tokens": 4096,
+            "thinking": {"type": "disabled"},
+            "thinking_budget": 128,
+        },
+    )
+    response = adapter.request(None, "judge prompt")
+
+    assert captured["url"] == "https://ark.ap-southeast.bytepluses.com/api/v3/responses"
+    assert captured["timeout"] == 120
+    assert captured["headers"]["Authorization"] == "Bearer test-key"
+    assert captured["headers"]["Ark-beta-mcp"] == "true"
+    assert captured["payload"] == {
+        "model": "seed-2-0-pro-260328",
+        "input": [
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "judge prompt"}],
+            }
+        ],
+        "temperature": 0.0,
+        "max_output_tokens": 4096,
+        "thinking": {"type": "disabled"},
+    }
+    assert response.text == "<answer>A</answer>"
+    assert response.input_tokens == 11
+    assert response.output_tokens == 3
+    assert response.generation_config == {
+        "model": "seed-2-0-pro-260328",
+        "temperature": 0.0,
+        "max_output_tokens": 4096,
+        "thinking": {"type": "disabled"},
     }
