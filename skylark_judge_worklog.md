@@ -45,3 +45,8 @@
   - Regenerated the active expanded base pair file to 15,939 tagged rows and the chotto Seed judge pair file to 1,518 tagged rows.
   - Conservative damage scan criteria: count confirmed damage only when an existing judged prompt exactly matches the old broken swap output and differs from the fixed swap output; use empty/incomplete judge wording only as a secondary red flag.
   - Confirmed damage against the pre-tag pair source: 836 matched expanded-base judgments and 68 chotto judgments. No matched “other prompt mismatch” cases and no unmatched structural suspects with empty/incomplete rationale wording were found.
+- Ran a wider local damage scan across 13 judged JSONL files / 95,562 rows:
+  - Confirmed damaged judgments total: 953, only counting rows with an available matching pair source whose judged prompt exactly matched the old broken swap output.
+  - Breakdown of confirmed rows: 836 in `zh-ja-chinese-models-v1.0` Seed base, 68 in chotto Seed, 16 in `zh-ja-v1.0` Gemini base, 16 in `zh-ja-v1.0` Seed base, 10 in chotto Gemini on `zh-ja-chinese-models-v1.0`, and 7 in chotto Gemini on `zh-ja-v1.0`.
+  - Structural suspects total: 28; these were rows where the judged prompt itself had a wrapper-only short side and the rationale mentioned empty/incomplete output, but they were not added to the confirmed count unless pair-source matching proved the old swap.
+  - Older `v0.9` and much of legacy `v1.0` lacked matching local pair sources, so those rows remain unconfirmed by this scan rather than counted as damaged.
