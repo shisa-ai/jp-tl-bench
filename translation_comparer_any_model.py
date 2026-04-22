@@ -3,6 +3,7 @@
 import os
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -83,8 +84,41 @@ def annotate_pair_for_judging(
     return annotated
 
 
-def swap_formatted_translation_sections(formatted_data: str) -> str:
-    """Keep A/B headings stable while swapping the translation bodies under them."""
+TRANSLATION_A_TAG = "translation_a"
+TRANSLATION_B_TAG = "translation_b"
+
+
+def swap_tagged_translation_sections(formatted_data: str) -> str:
+    """Swap explicit translation tag bodies while preserving A/B labels."""
+    pattern = re.compile(
+        rf"(?P<a_open><{TRANSLATION_A_TAG}>\n)"
+        rf"(?P<a_body>.*?)"
+        rf"(?P<a_close>\n</{TRANSLATION_A_TAG}>)"
+        rf"(?P<between>.*?)"
+        rf"(?P<b_open><{TRANSLATION_B_TAG}>\n)"
+        rf"(?P<b_body>.*?)"
+        rf"(?P<b_close>\n</{TRANSLATION_B_TAG}>)",
+        re.DOTALL,
+    )
+    match = pattern.search(formatted_data)
+    if not match:
+        raise ValueError("Missing tagged translation sections in formatted_data")
+
+    return (
+        formatted_data[: match.start()]
+        + match.group("a_open")
+        + match.group("b_body")
+        + match.group("a_close")
+        + match.group("between")
+        + match.group("b_open")
+        + match.group("a_body")
+        + match.group("b_close")
+        + formatted_data[match.end() :]
+    )
+
+
+def swap_markdown_translation_sections(formatted_data: str) -> str:
+    """Keep legacy Markdown A/B headings stable while swapping translation bodies."""
     lines = formatted_data.splitlines(keepends=True)
 
     def find_line(label: str, start: int = 0) -> int:
@@ -110,6 +144,13 @@ def swap_formatted_translation_sections(formatted_data: str) -> str:
     suffix = lines[end_idx:]
 
     return "".join(prefix + section_b + b_header + section_a + suffix)
+
+
+def swap_formatted_translation_sections(formatted_data: str) -> str:
+    """Keep A/B labels stable while swapping the translation bodies under them."""
+    if f"<{TRANSLATION_A_TAG}>" in formatted_data or f"<{TRANSLATION_B_TAG}>" in formatted_data:
+        return swap_tagged_translation_sections(formatted_data)
+    return swap_markdown_translation_sections(formatted_data)
 
 
 def validate_pair_record(pair: dict) -> None:

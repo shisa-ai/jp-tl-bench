@@ -122,6 +122,9 @@ def test_generate_translation_pairs_preserve_task_defined_slice_tags(tmp_path, m
     pair = json.loads(output_path.read_text(encoding="utf-8").splitlines()[0])
     assert pair["category"] == "support"
     assert pair["tags"] == ["official", "easy"]
+    assert "<source_text>\n你好，世界。\n</source_text>" in pair["formatted_data"]
+    assert "<translation_a>\nHello, world.\n</translation_a>" in pair["formatted_data"]
+    assert "<translation_b>\nHello, world.\n</translation_b>" in pair["formatted_data"]
 
 
 def test_compare_cli_uses_task_judge_profile_prompt_and_writes_judge_contract(
@@ -178,7 +181,7 @@ def test_compare_cli_uses_task_judge_profile_prompt_and_writes_judge_contract(
             str(pair_file),
         ],
         env={
-            "OPENAI_API_KEY": "test-key",
+            "GEMINI_API_KEY": "test-key",
             "BASESET_SNAPSHOT_DIR": str(tmp_path / "v1.0"),
         },
     )

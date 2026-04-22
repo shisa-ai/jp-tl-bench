@@ -11,6 +11,7 @@ Here are the evaluation criteria:
 7. Consistency: Uniform terminology and style throughout
 8. Target Audience Consideration: Appropriateness for intended readers
 Note that if a translation is empty, it means a valid answer was not submitted and it loses the comparison by default.
+The input uses `<source_text>` for the source, `<translation_a>` for Translation A, and `<translation_b>` for Translation B.
 
 Instructions:
 1. Carefully read the source text and both translations

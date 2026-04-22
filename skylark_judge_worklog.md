@@ -37,5 +37,11 @@
   - Direct Lite-vs-Pro Japanese-to-Chinese head-to-head was 18 / 36 each, so the large leaderboard gap came from comparisons against other anchors.
   - Found a swap-formatting bug: when a swapped B-side translation contained an internal standalone Markdown `---`, the old swap logic truncated it at the first rule and leaked the rest after Translation B.
   - Example: `amazon_2` made the judge see Pro as only `### 翻译结果：`, producing a rationale that Translation A was empty even though the stored Pro output was complete.
-  - Impact scan on the expanded base set: 901 swapped base judgments differ under the corrected swap, including 492 where `seed-2-0-pro-260328` was original B-side; the chotto shootout has 68 affected judgments.
+  - Initial pair-source impact scan found 901 swapped expanded-base pairs that would differ under the corrected swap, including 492 where `seed-2-0-pro-260328` was original B-side; the chotto shootout had 68 affected pairs.
   - Patched `swap_formatted_translation_sections` to use the terminal generated separator and added regression coverage for internal Markdown rules.
+- Migrated pair prompt formatting to explicit XML-style tags:
+  - New pair files render `<source_text>`, `<translation_a>`, and `<translation_b>` blocks instead of Markdown headings plus a `---` terminator.
+  - `swap_formatted_translation_sections` supports both the new tagged format and legacy Markdown pairs for older artifacts.
+  - Regenerated the active expanded base pair file to 15,939 tagged rows and the chotto Seed judge pair file to 1,518 tagged rows.
+  - Conservative damage scan criteria: count confirmed damage only when an existing judged prompt exactly matches the old broken swap output and differs from the fixed swap output; use empty/incomplete judge wording only as a secondary red flag.
+  - Confirmed damage against the pre-tag pair source: 836 matched expanded-base judgments and 68 chotto judgments. No matched “other prompt mismatch” cases and no unmatched structural suspects with empty/incomplete rationale wording were found.

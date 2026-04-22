@@ -60,3 +60,31 @@ def test_swap_translation_pair_sides_preserves_internal_markdown_rules():
         swapped["formatted_data"],
     )
     assert re.search(r"## Translation B\s+Plain translation\.", swapped["formatted_data"])
+
+
+def test_swap_translation_pair_sides_handles_tagged_sections_with_markdown_content():
+    pair = load_swap_pair_fixture()
+    pair["formatted_data"] = (
+        "<item>\n"
+        "<name>\nmarkdown_rule\n</name>\n\n"
+        "<source_text>\nこんにちは\n</source_text>\n\n"
+        "<translation_a>\n"
+        "Plain translation.\n"
+        "</translation_a>\n\n"
+        "<translation_b>\n"
+        "### 译文\n"
+        "---\n"
+        "Translated body after a Markdown rule.\n"
+        "---\n"
+        "Translator note after another rule.\n"
+        "</translation_b>\n"
+        "</item>\n"
+    )
+
+    swapped = swap_translation_pair_sides(copy.deepcopy(pair))
+
+    assert re.search(
+        r"<translation_a>\s+### 译文\s+---\s+Translated body after a Markdown rule\.\s+---\s+Translator note",
+        swapped["formatted_data"],
+    )
+    assert re.search(r"<translation_b>\s+Plain translation\.\s+</translation_b>", swapped["formatted_data"])

@@ -69,25 +69,24 @@ def validate_translation_record(item, file_label):
         )
 
 def format_translation_pair(conv_a, conv_b):
-    """Format a pair of translations into a single markdown document."""
+    """Format a pair of translations with explicit judge-safe section tags."""
     output = StringIO()
-    
-    # Write the name and source text
-    output.write(f"## Name: {conv_a.get('name', 'Unnamed')}\n\n")
-    output.write("## Source Text:\n")
-    output.write(f"{conv_a.get('source_text', '')}\n\n")
-    
-    # Write first translation
-    output.write("## Translation A\n")
-    output.write(f"{conv_a.get('translation', '')}\n\n")
-    
-    # Write second translation
-    output.write("## Translation B\n")
-    output.write(f"{conv_b.get('translation', '')}\n\n")
-    
-    # Add final separator
-    output.write("---\n")
-    
+
+    output.write("<item>\n")
+    output.write("<name>\n")
+    output.write(f"{conv_a.get('name', 'Unnamed')}\n")
+    output.write("</name>\n\n")
+    output.write("<source_text>\n")
+    output.write(f"{conv_a.get('source_text', '')}\n")
+    output.write("</source_text>\n\n")
+    output.write("<translation_a>\n")
+    output.write(f"{conv_a.get('translation', '')}\n")
+    output.write("</translation_a>\n\n")
+    output.write("<translation_b>\n")
+    output.write(f"{conv_b.get('translation', '')}\n")
+    output.write("</translation_b>\n")
+    output.write("</item>\n")
+
     return output.getvalue()
 
 def write_pair_settings(file_a, file_b, example_name):

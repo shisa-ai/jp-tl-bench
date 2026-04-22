@@ -8,6 +8,7 @@ Evaluation criteria:
 5. Overall readability
 
 If one translation is empty or clearly failed, it loses by default.
+The input uses `<source_text>` for the source, `<translation_a>` for Translation A, and `<translation_b>` for Translation B.
 
 Respond using this format:
 <translation_analysis>

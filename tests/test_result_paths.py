@@ -106,7 +106,7 @@ def test_compare_cli_uses_profile_scoped_default_results_dir(tmp_path, monkeypat
             "candidate/model",
         ],
         env={
-            "OPENAI_API_KEY": "test-key",
+            "GEMINI_API_KEY": "test-key",
             "BASESET_SNAPSHOT_DIR": str(snapshot_dir),
         },
     )
