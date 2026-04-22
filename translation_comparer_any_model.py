@@ -95,7 +95,13 @@ def swap_formatted_translation_sections(formatted_data: str) -> str:
 
     a_header_idx = find_line("## Translation A")
     b_header_idx = find_line("## Translation B", start=a_header_idx + 1)
-    end_idx = find_line("---", start=b_header_idx + 1)
+    end_idx = None
+    for index in range(len(lines) - 1, b_header_idx, -1):
+        if lines[index].strip() == "---":
+            end_idx = index
+            break
+    if end_idx is None:
+        raise ValueError("Missing terminal '---' separator in formatted_data")
 
     prefix = lines[: a_header_idx + 1]
     section_a = lines[a_header_idx + 1 : b_header_idx]

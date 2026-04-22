@@ -33,3 +33,9 @@
   - Reused 1,242 judgments and judged 276 new pairs; 276 / 276 new judgments succeeded with 0 failures.
   - Final answer-tag validation: 639 A, 879 B, 0 missing.
   - Generated scores at `results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/scores.json`.
+- Investigated unexpectedly high `seed-2-0-lite-260228` scores over `seed-2-0-pro-260328`:
+  - Direct Lite-vs-Pro Japanese-to-Chinese head-to-head was 18 / 36 each, so the large leaderboard gap came from comparisons against other anchors.
+  - Found a swap-formatting bug: when a swapped B-side translation contained an internal standalone Markdown `---`, the old swap logic truncated it at the first rule and leaked the rest after Translation B.
+  - Example: `amazon_2` made the judge see Pro as only `### 翻译结果：`, producing a rationale that Translation A was empty even though the stored Pro output was complete.
+  - Impact scan on the expanded base set: 901 swapped base judgments differ under the corrected swap, including 492 where `seed-2-0-pro-260328` was original B-side; the chotto shootout has 68 affected judgments.
+  - Patched `swap_formatted_translation_sections` to use the terminal generated separator and added regression coverage for internal Markdown rules.

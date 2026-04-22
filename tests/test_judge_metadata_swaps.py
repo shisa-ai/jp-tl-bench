@@ -35,3 +35,28 @@ def test_swap_translation_pair_sides_keeps_side_metadata_and_labels_in_sync(newl
     assert swapped["llm_b_generation_config"] == pair["llm_a_generation_config"]
     assert re.search(r"## Translation A\s+\*\*Example 1:\*\*", swapped["formatted_data"])
     assert re.search(r"## Translation B\s+Example 1:", swapped["formatted_data"])
+
+
+def test_swap_translation_pair_sides_preserves_internal_markdown_rules():
+    pair = load_swap_pair_fixture()
+    pair["formatted_data"] = (
+        "## Name: markdown_rule\n\n"
+        "## Source Text:\nこんにちは\n\n"
+        "## Translation A\n"
+        "Plain translation.\n\n"
+        "## Translation B\n"
+        "### 译文\n"
+        "---\n"
+        "Translated body after a Markdown rule.\n"
+        "---\n"
+        "Translator note after another rule.\n\n"
+        "---\n"
+    )
+
+    swapped = swap_translation_pair_sides(copy.deepcopy(pair))
+
+    assert re.search(
+        r"## Translation A\s+### 译文\s+---\s+Translated body after a Markdown rule\.\s+---\s+Translator note",
+        swapped["formatted_data"],
+    )
+    assert re.search(r"## Translation B\s+Plain translation\.", swapped["formatted_data"])
