@@ -1,10 +1,10 @@
 {
-  "model": "shisa-ai/chotto-e4b-20260408",
+  "model": "shisa-ai/chotto-14b-20251007-dpo",
   "judge_model": "seed-2-0-pro-260328",
   "baseset_version": "zh-ja-chinese-models-v1.0",
-  "pairs_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/pairs.jsonl",
-  "judgments_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-e4b-20260408/seed-2-0-pro-260328.cn_judge/judgments.jsonl",
-  "timestamp_utc": "2026-04-22T14:45:49.637127Z",
+  "pairs_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-14b-20251007-dpo/seed-2-0-pro-260328.cn_judge/pairs.jsonl",
+  "judgments_file": "results/zh-ja-chinese-models-v1.0/shisa-ai__chotto-14b-20251007-dpo/seed-2-0-pro-260328.cn_judge/judgments.jsonl",
+  "timestamp_utc": "2026-04-22T23:51:20.420491Z",
   "expected_pairs": 1518,
   "judged_pairs": 1518,
   "missing_pairs": 0,
@@ -17,52 +17,52 @@
     "overall": {
       "difficulty": "all",
       "language": "zh_ja",
-      "lt": 8.67178643599771,
-      "wins": 531,
+      "lt": 0.0016958410886874367,
+      "wins": 1,
       "total": 726,
-      "win_rate": 0.731404958677686
+      "win_rate": 0.0013774104683195593
     },
     "easy": {
       "difficulty": "easy",
       "language": "zh_ja",
-      "lt": 9.051708224318357,
-      "wins": 206,
+      "lt": 2.783187931078241e-07,
+      "wins": 0,
       "total": 264,
-      "win_rate": 0.7803030303030303
+      "win_rate": 0.0
     },
     "hard": {
       "difficulty": "hard",
       "language": "zh_ja",
-      "lt": 8.33447030866292,
-      "wins": 325,
+      "lt": 0.002130884208533591,
+      "wins": 1,
       "total": 462,
-      "win_rate": 0.7034632034632035
+      "win_rate": 0.0021645021645021645
     }
   },
   "ja_zh": {
     "overall": {
       "difficulty": "all",
       "language": "ja_zh",
-      "lt": 6.181221044766114,
-      "wins": 439,
+      "lt": 0.002509748393395988,
+      "wins": 3,
       "total": 792,
-      "win_rate": 0.5542929292929293
+      "win_rate": 0.003787878787878788
     },
     "easy": {
       "difficulty": "easy",
       "language": "ja_zh",
-      "lt": 6.583530021171424,
-      "wins": 192,
+      "lt": 0.0028123180900779202,
+      "wins": 1,
       "total": 330,
-      "win_rate": 0.5818181818181818
+      "win_rate": 0.0030303030303030303
     },
     "hard": {
       "difficulty": "hard",
       "language": "ja_zh",
-      "lt": 5.758207338842717,
-      "wins": 247,
+      "lt": 0.0016771078712156575,
+      "wins": 2,
       "total": 462,
-      "win_rate": 0.5346320346320347
+      "win_rate": 0.004329004329004329
     }
   }
 }

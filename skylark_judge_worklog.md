@@ -2,6 +2,13 @@
 
 ## 2026-04-22
 
+- Started evaluation setup for private 14B Chotto DPO checkpoints:
+  - `shisa-ai/chotto-14b-20260107-dpo`
+  - `shisa-ai/chotto-14b-20251007-dpo`
+  - Both Hugging Face model APIs require auth but are accessible with local `HF_TOKEN`.
+  - Both are Llama-style BF16 text-generation models with 16,384 max position embeddings.
+  - Added `scripts/run_chotto_14b_pair.sh` to run them sequentially through local vLLM generation, Seed Pro Skylark judging, scoring, and score visualization against `baseset/zh-ja-chinese-models-v1.0`.
+  - Restarted vLLM startup with `--enforce-eager -O0` after the first compile-mode launch did not become healthy promptly.
 - Added a BytePlus Ark Responses transport for `translation_comparer_any_model.py`.
 - Exposed it through `--skylark-judge` and `JUDGE_TRANSPORT=skylark` in `run_translation_bench.sh`.
 - Documented the `seed-2-0-pro-260328` judge invocation with `BYTEPLUS_TOKEN` and the Ark Responses endpoint.
@@ -50,3 +57,35 @@
   - Breakdown of confirmed rows: 836 in `zh-ja-chinese-models-v1.0` Seed base, 68 in chotto Seed, 16 in `zh-ja-v1.0` Gemini base, 16 in `zh-ja-v1.0` Seed base, 10 in chotto Gemini on `zh-ja-chinese-models-v1.0`, and 7 in chotto Gemini on `zh-ja-v1.0`.
   - Structural suspects total: 28; these were rows where the judged prompt itself had a wrapper-only short side and the rationale mentioned empty/incomplete output, but they were not added to the confirmed count unless pair-source matching proved the old swap.
   - Older `v0.9` and much of legacy `v1.0` lacked matching local pair sources, so those rows remain unconfirmed by this scan rather than counted as damaged.
+
+## 2026-04-23
+
+- Audited target-vs-base pair ordering and judge-side swapping after noticing confusing side balance in the inspector.
+- Current issues to fix before rerunning scored target models:
+  - `generate_shootout_data.py` emits target-model shootout pairs with the target always in `llm_a` and base anchor always in `llm_b`; this makes `pairs.jsonl` misleading and leaves side randomization outside the pair artifact.
+  - `translation_comparer_any_model.py` validates target-model runs by requiring the test model to appear in `llm_a`, which prevents pair-generation-side randomization for target runs.
+  - `translation_comparer_any_model.py` also swaps half the pairs again at judge time, so a naive pair-generation randomization change would double-randomize unless the judging step learns that the pair file is already side-assigned.
+  - Existing judgment reuse is keyed by pair id plus `pair_fingerprint`; because the fingerprint includes `llm_a`, `llm_b`, and formatted A/B text, changing side assignment should naturally force rejudge for changed rows, but the migration needs to be explicit so old fixed-side rows are not mistaken for fresh randomized artifacts.
+  - `inspect-output` still uses `answer == "B"` for win/loss filtering and summary counts, which is wrong once the inspected test model can appear on either side.
+- Proposed repair plan for review:
+  - Move deterministic side assignment into `generate_shootout_data.py` for target-vs-base pairs. Use a stable hash of the canonical pair identity (`test_model_file`, `base_file`, item key/name, and pair schema/seed) to decide whether to write the target as A or B.
+  - Preserve stable logical pair ids independent of display side where possible, and add explicit metadata such as `side_assignment_schema`, `side_assignment_seed`, and `test_model_side` so downstream code can tell that a pair file has already been randomized.
+  - Update target-run validation in `translation_comparer_any_model.py` to require the test model in either `llm_a` or `llm_b`, and fail only if a pair contains neither or both unexpectedly.
+  - Disable judge-time swapping for pair files marked with the new side-assignment metadata; keep the existing deterministic judge-time swap only for legacy unmarked pair files and base-set generation until those are intentionally migrated.
+  - Keep `pair_fingerprint` side-sensitive so changed A/B presentation forces rejudging and old cached judgments do not silently survive the migration.
+  - Fix `inspect-output` win/loss filters and summaries to compute wins by matching the selected model against `llm_a`/`llm_b`, not by assuming answer B.
+  - Add tests for mixed target-side pair generation, target validation with target on both sides, no double-swap for marked randomized pairs, legacy swap compatibility, and inspector win/loss classification with target-as-A and target-as-B examples.
+  - Regenerate target pair files and rerun affected target-model judgments/scores after the code lands. Treat current non-base-set result scores as stale once the new randomized pair artifacts are produced.
+- Confirmed and fixed an `inspect-output` viewer/filter bug:
+  - The detail pane already computed the selected model win from actual `llm_a`/`llm_b` side, but the wins-only/losses-only filters and summary counts assumed `answer == "B"` meant the selected model won.
+  - Replaced that fixed-side assumption with side-aware `ComparisonMetadata.is_model_win(model_id)` logic and made answer-tag parsing tolerate whitespace inside `<answer>` tags.
+  - Added regression coverage in `tests/test_inspect_output.py`.
+  - Real-data sanity check for `shisa-ai__chotto-14b-20251007-dpo`: 1,518 judgments, answer A 717, answer B 801, target as A 803, target as B 715, selected-model wins 4 and losses 1,514.
+- Fixed `inspect-output` comparison detail rendering for current XML-style pair artifacts:
+  - The viewer only parsed legacy Markdown headings, so current `<source_text>`, `<translation_a>`, and `<translation_b>` judgments displayed empty/missing translation content.
+  - Added XML-tag parsing before the Markdown fallback and trimmed legacy terminal `---` from Translation B.
+  - Real-data sanity check on `shisa-ai__chotto-14b-20251007-dpo` now extracts nonempty source text plus both translations from a current tagged judgment row.
+- Moved scratch chunk artifacts for the Seed Pro XML base-set rerun out of the repo:
+  - Destination: `/home/aomori/jp-tl-bench-artifact-hold/20260423T015351Z/`
+  - Moved `rerun_chunks_seed_pro_xml` and `rerun_judgments_seed_pro_xml`.
+  - Kept canonical merged outputs under `baseset/zh-ja-chinese-models-v1.0/`.

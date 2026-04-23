@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,31 @@ else:
 def display_model_name(safe_name: str) -> str:
     """Convert safe model name back to display format."""
     return safe_name.replace("__", "/")
+
+
+def normalize_model_id(model_name: str) -> str:
+    """Normalize model ids so safe and display names compare consistently."""
+    return model_name.replace("/", "__")
+
+
+def model_id_from_safe_name(safe_name: str) -> str:
+    """Return the result model id, stripping any judge suffix used by the viewer."""
+    return safe_name.split("@", 1)[0]
+
+
+def extract_answer(data: Dict[str, Any]) -> str:
+    """Extract an A/B answer from structured fields or judge analysis."""
+    answer = str(data.get("answer", "")).strip().upper()
+    if answer in {"A", "B"}:
+        return answer
+
+    analysis_text = data.get("analysis", "")
+    if isinstance(analysis_text, str):
+        match = re.search(r"<answer>\s*([AB])\s*</answer>", analysis_text, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
+    return ""
 
 
 def safe_float(value: Any) -> Optional[float]:
@@ -89,9 +115,17 @@ class ComparisonMetadata:
     def winner(self) -> str:
         return self.llm_a if self.answer == "A" else self.llm_b
 
-    @property
-    def is_test_model_win(self) -> bool:
-        return self.answer == "B"
+    def model_side(self, model_name: str) -> Optional[str]:
+        normalized_model = normalize_model_id(model_name)
+        if normalize_model_id(self.llm_a) == normalized_model:
+            return "A"
+        if normalize_model_id(self.llm_b) == normalized_model:
+            return "B"
+        return None
+
+    def is_model_win(self, model_name: str) -> bool:
+        side = self.model_side(model_name)
+        return side is not None and self.answer == side
 
 
 @dataclass
@@ -115,6 +149,7 @@ class ModelScores:
     en_score: float
     lt_score: float
     win_rate: float
+    direction_scores: Dict[str, float]
 
 
 @dataclass
@@ -198,6 +233,20 @@ def load_translation_detail(translation_file: Path, metadata: TranslationMetadat
 
 def parse_formatted_data(formatted_data: str) -> Tuple[str, str, str]:
     """Parse formatted_data field to extract source text and translations."""
+    def extract_tag(tag: str) -> str:
+        match = re.search(
+            rf"<{tag}>\s*(.*?)\s*</{tag}>",
+            formatted_data,
+            re.DOTALL | re.IGNORECASE,
+        )
+        return match.group(1).strip() if match else ""
+
+    tagged_source = extract_tag("source_text")
+    tagged_a = extract_tag("translation_a")
+    tagged_b = extract_tag("translation_b")
+    if tagged_source or tagged_a or tagged_b:
+        return tagged_source, tagged_a, tagged_b
+
     source_text = ""
     translation_a = ""
     translation_b = ""
@@ -230,6 +279,10 @@ def parse_formatted_data(formatted_data: str) -> Tuple[str, str, str]:
             save_section()
             current_section = "translation_b"
             current_content = []
+        elif line.strip() == "---":
+            save_section()
+            current_section = None
+            current_content = []
         elif line.startswith("##"):
             save_section()
             current_section = None
@@ -256,13 +309,7 @@ def load_comparison_metadata(comparison_file: Path) -> List[ComparisonMetadata]:
 
             try:
                 data = json.loads(line)
-                answer = data.get("answer", "")
-                if not answer and "analysis" in data:
-                    analysis_text = data["analysis"]
-                    if "<answer>A</answer>" in analysis_text:
-                        answer = "A"
-                    elif "<answer>B</answer>" in analysis_text:
-                        answer = "B"
+                answer = extract_answer(data)
 
                 metadata = ComparisonMetadata(
                     index=idx,
@@ -322,23 +369,34 @@ def load_score_summary_from_json(score_file: Path, model_name: str) -> Optional[
 
         safe_name = model_name.replace("/", "__")
 
-        # Extract scores from new format
-        en_data = data.get("en_ja", {}).get("overall", {})
-        ja_data = data.get("ja_en", {}).get("overall", {})
+        direction_rows = []
+        for key, value in data.items():
+            if not isinstance(value, dict):
+                continue
+            overall = value.get("overall")
+            if not isinstance(overall, dict):
+                continue
+            lt = safe_float(overall.get("lt"))
+            wins = overall.get("wins", 0)
+            total = overall.get("total", 0)
+            if lt is None:
+                continue
+            direction_rows.append((key, lt, wins, total))
 
-        en_wins = en_data.get("wins", 0)
-        en_total = en_data.get("total", 0)
-        ja_wins = ja_data.get("wins", 0)
-        ja_total = ja_data.get("total", 0)
+        if not direction_rows:
+            return None
 
-        total_wins = en_wins + ja_wins
-        total_matches = en_total + ja_total
-
-        en_lt = safe_float(en_data.get("lt")) or 0.0
-        ja_lt = safe_float(ja_data.get("lt")) or 0.0
-
-        # Average LT score
-        avg_lt = (en_lt + ja_lt) / 2 if (en_lt and ja_lt) else (en_lt or ja_lt)
+        total_wins = sum(wins for _, _, wins, _ in direction_rows)
+        total_matches = sum(total for _, _, _, total in direction_rows)
+        total_weight = sum(total for _, _, _, total in direction_rows)
+        avg_lt = (
+            sum(lt * total for _, lt, _, total in direction_rows) / total_weight
+            if total_weight
+            else sum(lt for _, lt, _, _ in direction_rows) / len(direction_rows)
+        )
+        direction_scores = {key: lt for key, lt, _, _ in direction_rows}
+        first_lt = direction_rows[0][1]
+        second_lt = direction_rows[1][1] if len(direction_rows) > 1 else 0.0
 
         return ModelScores(
             model_name=model_name,
@@ -346,12 +404,22 @@ def load_score_summary_from_json(score_file: Path, model_name: str) -> Optional[
             score=avg_lt,
             wins=total_wins,
             total_matches=total_matches,
-            en_score=en_lt,
-            lt_score=ja_lt,
+            en_score=first_lt,
+            lt_score=second_lt,
             win_rate=total_wins / total_matches if total_matches > 0 else 0.0,
+            direction_scores=direction_scores,
         )
     except (json.JSONDecodeError, ValueError, KeyError):
         return None
+
+
+def format_score_summary(scores: ModelScores) -> str:
+    """Format score summary without assuming a fixed language pair."""
+    parts = [f"LT: {scores.score:.2f}"]
+    for direction, value in scores.direction_scores.items():
+        parts.append(f"{direction}: {value:.2f}")
+    parts.append(f"WR: {scores.win_rate*100:.1f}%")
+    return " • ".join(parts)
 
 
 # ===== Model Loading Functions =====
@@ -428,13 +496,7 @@ def load_results_comparison_metadata(judgments_file: Path) -> List[ComparisonMet
                 data = json.loads(line)
 
                 # Extract answer from analysis if not directly available
-                answer = data.get("answer", "")
-                if not answer and "analysis" in data:
-                    analysis_text = data["analysis"]
-                    if "<answer>A</answer>" in analysis_text:
-                        answer = "A"
-                    elif "<answer>B</answer>" in analysis_text:
-                        answer = "B"
+                answer = extract_answer(data)
 
                 metadata = ComparisonMetadata(
                     index=idx,
@@ -545,15 +607,17 @@ def get_available_versions(results_dir: Path, baseset_dir: Path) -> Tuple[List[s
     results_versions = []
     if results_dir.exists():
         for d in sorted(results_dir.iterdir()):
-            # Match vX.X pattern, exclude backups
-            if d.is_dir() and d.name.startswith("v") and "-backup" not in d.name:
+            if not d.is_dir() or "-backup" in d.name:
+                continue
+            if any(child.is_dir() for child in d.iterdir()):
                 results_versions.append(d.name)
 
     baseset_versions = []
     if baseset_dir.exists():
         for d in sorted(baseset_dir.iterdir()):
-            # Match vX.X pattern, exclude backups
-            if d.is_dir() and d.name.startswith("v") and "-backup" not in d.name:
+            if not d.is_dir() or "-backup" in d.name:
+                continue
+            if (d / "translations").exists() or any(d.glob("base_set.*.jsonl")):
                 baseset_versions.append(d.name)
 
     return results_versions, baseset_versions
@@ -567,9 +631,7 @@ def format_model_title(model: ModelData, view_mode: str) -> Text:
     text.append(model.display_name, style="bold cyan")
 
     if model.scores:
-        text.append(f" • LT: {model.scores.lt_score:.2f}")
-        text.append(f" • EN: {model.scores.en_score:.2f}")
-        text.append(f" • WR: {model.scores.win_rate*100:.1f}%")
+        text.append(f" • {format_score_summary(model.scores)}")
 
     if view_mode == "translations":
         count = len(model.translations_metadata)
@@ -629,11 +691,15 @@ def build_comparison_renderable(detail: ComparisonDetail, test_model: str) -> Gr
     """Build rich renderable for a single comparison."""
     meta = detail.metadata
 
-    test_is_b = meta.llm_b == test_model or meta.llm_b.replace("/", "__") == test_model
-    won = (test_is_b and meta.answer == "B") or (not test_is_b and meta.answer == "A")
+    won = meta.is_model_win(test_model)
+    model_side = meta.model_side(test_model)
 
-    icon = "✅" if won else "❌"
-    icon_style = "green" if won else "red"
+    if model_side is None:
+        icon = "•"
+        icon_style = "dim"
+    else:
+        icon = "✅" if won else "❌"
+        icon_style = "green" if won else "red"
 
     header = Text()
     header.append(icon + " ", style=icon_style)
@@ -1001,10 +1067,16 @@ if App is not None:
                 return self.selected_model.translations_metadata
             else:
                 comparisons = self.selected_model.comparisons_metadata
+                selected_model_id = model_id_from_safe_name(self.selected_model.safe_name)
                 if self.show_wins_only:
-                    comparisons = [c for c in comparisons if c.is_test_model_win]
+                    comparisons = [c for c in comparisons if c.is_model_win(selected_model_id)]
                 elif self.show_losses_only:
-                    comparisons = [c for c in comparisons if not c.is_test_model_win]
+                    comparisons = [
+                        c
+                        for c in comparisons
+                        if c.model_side(selected_model_id) is not None
+                        and not c.is_model_win(selected_model_id)
+                    ]
                 return comparisons
 
         def _refresh_content(self) -> None:
@@ -1031,7 +1103,12 @@ if App is not None:
                 summary_text = f"Showing translation {self.current_index + 1}/{len(filtered_items)}"
                 summary_text += f" • Total: {total} translations"
             else:
-                wins = sum(1 for c in model.comparisons_metadata if c.is_test_model_win)
+                selected_model_id = model_id_from_safe_name(model.safe_name)
+                wins = sum(
+                    1
+                    for c in model.comparisons_metadata
+                    if c.is_model_win(selected_model_id)
+                )
                 total = len(model.comparisons_metadata)
                 summary_text = f"Showing comparison {self.current_index + 1}/{len(filtered_items)}"
                 if self.show_wins_only:
@@ -1041,7 +1118,7 @@ if App is not None:
                 summary_text += f" • Total: {len(filtered_items)}/{total}"
 
             if model.scores:
-                summary_text += f" • LT: {model.scores.lt_score:.2f} • EN: {model.scores.en_score:.2f}"
+                summary_text += f" • {format_score_summary(model.scores)}"
 
             summary.update(summary_text)
 
@@ -1063,7 +1140,7 @@ if App is not None:
 
                 if detail:
                     # Extract model name without judge suffix for display
-                    display_model = model.safe_name.split("@")[0] if "@" in model.safe_name else model.safe_name
+                    display_model = model_id_from_safe_name(model.safe_name)
                     details.update(build_comparison_renderable(detail, display_model))
                 else:
                     details.update(Text(f"Failed to load comparison details for {current_meta.name}"))
