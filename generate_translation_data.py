@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import sys
 import time
 from datasets import Dataset, load_dataset
 from openai import OpenAI
@@ -54,29 +55,31 @@ class Translator:
         """Get model-specific configuration based on model name."""
         model_lower = self.model_name.lower()
         
-        # Claude Opus 4.1 - no top_p
-        if "claude-opus-4-1" in model_lower:
+        # Claude models reject requests that specify both temperature and top_p.
+        if "claude-" in model_lower:
             return ModelConfig(
                 temperature=0.2,
                 top_p=None
             )
         
-        # GPT-5 mini/nano - no temperature/top_p 
-        if "gpt-5-mini" in model_lower or "gpt-5-nano" in model_lower:
+        # GPT-5 mini/nano — matches gpt-5-mini, gpt-5.4-mini, gpt-5-nano, gpt-5.4-nano, etc.
+        if "gpt-5" in model_lower and ("mini" in model_lower or "nano" in model_lower):
             return ModelConfig(
                 temperature=None,
                 top_p=None
             )
-        
+
         # Gemini 2.5 Pro - reasoning effort required
         if "gemini-2.5-pro" in model_lower:
             return ModelConfig(
                 reasoning_effort="low"
             )
-        
-        # GPT-5 (not chat-latest) - minimal reasoning
+
+        # GPT-5 (not chat-latest, not mini/nano) — reasoning effort, no sampling params
         if "gpt-5" in model_lower and "gpt-5-chat-latest" not in model_lower:
             return ModelConfig(
+                temperature=None,
+                top_p=None,
                 reasoning_effort="minimal"
             )
         
@@ -317,6 +320,7 @@ def main(base_url, test_model, low_context, ultra_low_context, max_workers, conc
         print(f"\nFailed items:")
         for failed in translator.failed_items:
             print(f"  - {failed['name']}: {failed['error']}")
+        sys.exit(1)
 
     print(f"\nToken Usage Summary:")
     print(f"Input tokens: {translator.total_input_tokens:,}")

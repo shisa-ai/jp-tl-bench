@@ -27,13 +27,25 @@ except ImportError:
 class TranslationComparer:
     """Compares two translations and analyzes their differences."""
 
-    def __init__(self, model_name: str, base_url: str, api_key: str, concurrency_limit: int, prompt_path: Path, use_gemini: bool = False):
+    def __init__(
+        self,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        concurrency_limit: int,
+        prompt_path: Path,
+        use_gemini: bool = False,
+        request_delay_seconds: float = 0.0,
+    ):
         self.model_name = model_name
         self.use_gemini = use_gemini
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.failed_items = []
         self.semaphore = threading.BoundedSemaphore(concurrency_limit)
+        self.rate_limit_lock = threading.Lock()
+        self.last_request_at = 0.0
+        self.request_delay_seconds = request_delay_seconds
         self.prompt_path = prompt_path
 
         if use_gemini:
@@ -60,6 +72,18 @@ class TranslationComparer:
                 base_url=base_url,
                 api_key=api_key,
             )
+
+    def pace_request(self) -> None:
+        """Apply a global minimum delay between judge API calls."""
+        if self.request_delay_seconds <= 0:
+            return
+
+        with self.rate_limit_lock:
+            now = time.monotonic()
+            wait_seconds = self.request_delay_seconds - (now - self.last_request_at)
+            if wait_seconds > 0:
+                time.sleep(wait_seconds)
+            self.last_request_at = time.monotonic()
 
     def prompt(self, input_data: dict) -> str:
         """Generate a prompt for comparison using the template from prompts/compare_prompt.txt and the translation data."""
@@ -132,6 +156,7 @@ class TranslationComparer:
                         judge_generation_config['thinking_budget'] = thinking_budget
 
                     # Generate content
+                    self.pace_request()
                     response = self.client.models.generate_content(
                         model=self.model_name,
                         contents=prompt_text,
@@ -200,6 +225,7 @@ class TranslationComparer:
                     judge_generation_config = call_params.copy()
                     judge_generation_config.pop("messages", None)  # Remove messages from config
 
+                    self.pace_request()
                     chat_completion = self.client.chat.completions.create(**call_params)
                     if not chat_completion.choices or chat_completion.choices[0].message.content is None:
                         raise ValueError("Empty response from API")
@@ -260,6 +286,13 @@ class TranslationComparer:
 @click.option('--max-workers', default=40, help='Number of worker threads for comparison.')
 @click.option('--concurrency-limit', default=40, help='Max number of concurrent API requests.')
 @click.option(
+    '--request-delay-seconds',
+    default=0.0,
+    type=float,
+    show_default=True,
+    help='Minimum delay between judge API calls. Use 13 for Gemini free-tier 5 RPM.',
+)
+@click.option(
     '--api-key-env',
     default=os.getenv("JUDGE_API_KEY_ENV", "OPENAI_API_KEY"),
     show_default=True,
@@ -279,7 +312,7 @@ class TranslationComparer:
     help='Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.',
 )
 @click.option('--rejudge', is_flag=True, help='Ignore existing judgments and redo all pairs.')
-def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
+def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, request_delay_seconds, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
     """Compare translations between different models using a third LLM as analyzer.
 
     Reads the translation pairs from the JSONL file, creates a dataset,
@@ -433,6 +466,7 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         concurrency_limit=concurrency_limit,
         prompt_path=prompt_path,
         use_gemini=gemini_judge,
+        request_delay_seconds=request_delay_seconds,
     )
 
     results = comparer(translations, max_workers=max_workers)

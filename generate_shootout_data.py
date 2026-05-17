@@ -22,6 +22,16 @@ def load_jsonl(file_path):
             data.append(json.loads(line))
     return data
 
+def failed_translation_names(items):
+    """Return benchmark item names whose translation is a recorded failure."""
+    failed = []
+    for item in items:
+        generation_config = item.get("generation_config") or {}
+        translation = item.get("translation") or ""
+        if generation_config.get("error") or translation.startswith("[TRANSLATION FAILED:"):
+            failed.append(item.get("name", "unknown"))
+    return failed
+
 def format_translation_pair(conv_a, conv_b):
     """Format a pair of translations into a single markdown document."""
     output = StringIO()
@@ -112,6 +122,14 @@ def generate_translation_pairs(test_model_file=None, force=False, output_path=No
                 # Load target file from translations and comparison file from base_translations
                 convs_a = load_jsonl(os.path.join(translations_dir, file_a))
                 convs_b = load_jsonl(os.path.join(base_translations_dir, file_b))
+                failed_names = failed_translation_names(convs_a)
+                if failed_names:
+                    preview = ", ".join(failed_names[:5])
+                    suffix = "" if len(failed_names) <= 5 else f", ... ({len(failed_names)} total)"
+                    raise ValueError(
+                        f"{file_a} contains failed placeholder translations: {preview}{suffix}. "
+                        "Rerun translation successfully before generating shootout pairs."
+                    )
             else:
                 # Load both files from the same working directory
                 convs_a = load_jsonl(os.path.join(base_translations_dir, file_a))
