@@ -23,6 +23,7 @@ class ModelConfig:
     top_p: Optional[float] = 0.85
     frequency_penalty: Optional[float] = None
     reasoning_effort: Optional[str] = None
+    max_tokens_param: Optional[str] = "max_tokens"
     prompt_file: Optional[str] = None  # Override prompt file path (relative to project root)
 
 class Translator:
@@ -66,7 +67,8 @@ class Translator:
         if "gpt-5" in model_lower and ("mini" in model_lower or "nano" in model_lower):
             return ModelConfig(
                 temperature=None,
-                top_p=None
+                top_p=None,
+                max_tokens_param="max_completion_tokens"
             )
 
         # Gemini 2.5 Pro - reasoning effort required
@@ -80,7 +82,8 @@ class Translator:
             return ModelConfig(
                 temperature=None,
                 top_p=None,
-                reasoning_effort="minimal"
+                reasoning_effort="minimal",
+                max_tokens_param="max_completion_tokens"
             )
         
         # Legacy Gemini 2.5 support (keeping existing behavior)
@@ -194,8 +197,8 @@ class Translator:
                         params["frequency_penalty"] = model_config.frequency_penalty
                     if model_config.reasoning_effort is not None:
                         params["reasoning_effort"] = model_config.reasoning_effort
-                    if self.max_tokens is not None:
-                        params["max_tokens"] = self.max_tokens
+                    if self.max_tokens is not None and model_config.max_tokens_param is not None:
+                        params[model_config.max_tokens_param] = self.max_tokens
 
                     # Create generation config for saving
                     generation_config = params.copy()

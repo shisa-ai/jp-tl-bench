@@ -36,6 +36,7 @@ class TranslationComparer:
         prompt_path: Path,
         use_gemini: bool = False,
         request_delay_seconds: float = 0.0,
+        request_timeout_seconds: float = 180.0,
     ):
         self.model_name = model_name
         self.use_gemini = use_gemini
@@ -47,11 +48,17 @@ class TranslationComparer:
         self.last_request_at = 0.0
         self.request_delay_seconds = request_delay_seconds
         self.prompt_path = prompt_path
+        self.request_timeout_seconds = request_timeout_seconds
+        self.abort_event = threading.Event()
+        self.abort_reason = None
 
         if use_gemini:
             if not GEMINI_AVAILABLE:
                 raise ImportError("google-genai is required for native Gemini support. Install with: pip install google-genai")
-            self.client = genai.Client(api_key=api_key)
+            http_options = None
+            if request_timeout_seconds > 0:
+                http_options = genai_types.HttpOptions(timeout=int(request_timeout_seconds * 1000))
+            self.client = genai.Client(api_key=api_key, http_options=http_options)
             # Set up safety settings to bypass safety filters
             self.safety_settings = [
                 genai_types.SafetySetting(
@@ -68,9 +75,11 @@ class TranslationComparer:
                 ),
             ]
         else:
+            timeout = request_timeout_seconds if request_timeout_seconds > 0 else None
             self.client = OpenAI(
                 base_url=base_url,
                 api_key=api_key,
+                timeout=timeout,
             )
 
     def pace_request(self) -> None:
@@ -84,6 +93,18 @@ class TranslationComparer:
             if wait_seconds > 0:
                 time.sleep(wait_seconds)
             self.last_request_at = time.monotonic()
+
+    def abort_for_daily_quota(self, error_msg: str) -> bool:
+        """Stop the batch when the judge model's daily request cap is exhausted."""
+        if "generate_requests_per_model_per_day" not in error_msg:
+            return False
+        self.abort_reason = (
+            "Gemini judge daily request quota exhausted. "
+            "Checkpointed judgments were written; rerun after quota reset to resume."
+        )
+        self.abort_event.set()
+        print(f"Aborting judge run: {self.abort_reason}")
+        return True
 
     def prompt(self, input_data: dict) -> str:
         """Generate a prompt for comparison using the template from prompts/compare_prompt.txt and the translation data."""
@@ -117,16 +138,23 @@ class TranslationComparer:
 
     def compare_item_gemini(self, item: dict) -> dict:
         """Compares a single item using native Gemini API with retry logic and concurrency control."""
+        if self.abort_event.is_set():
+            return None
+
         # Add jitter to spread out requests
         time.sleep(random.uniform(0.1, 0.5))
 
         with self.semaphore:
+            if self.abort_event.is_set():
+                return None
             prompt_text = self.prompt(item)
 
             max_retries = 5
             base_delay = 1
 
             for attempt in range(max_retries + 1):
+                if self.abort_event.is_set():
+                    return None
                 try:
                     # Set up thinking config for Gemini 2.5 models
                     # thinking_budget is in tokens: 0 = disabled (flash), 128 = low (pro), 512 = medium, higher = more thinking
@@ -176,6 +204,8 @@ class TranslationComparer:
 
                 except Exception as e:
                     error_msg = f"API error: {type(e).__name__}: {str(e)}"
+                    if self.abort_for_daily_quota(error_msg):
+                        return None
                     if attempt == max_retries:
                         # Track failed item
                         failed_item = {
@@ -196,16 +226,23 @@ class TranslationComparer:
         if self.use_gemini:
             return self.compare_item_gemini(item)
 
+        if self.abort_event.is_set():
+            return None
+
         # Add jitter to spread out requests
         time.sleep(random.uniform(0.1, 0.5))
 
         with self.semaphore:
+            if self.abort_event.is_set():
+                return None
             prompt_text = self.prompt(item)
 
             max_retries = 5
             base_delay = 1
 
             for attempt in range(max_retries + 1):
+                if self.abort_event.is_set():
+                    return None
                 try:
                     temp = 0
                     lower_name = self.model_name.lower()
@@ -242,6 +279,8 @@ class TranslationComparer:
 
                 except Exception as e:
                     error_msg = f"API error: {type(e).__name__}: {str(e)}"
+                    if self.abort_for_daily_quota(error_msg):
+                        return None
                     if attempt == max_retries:
                         # Track failed item
                         failed_item = {
@@ -257,12 +296,18 @@ class TranslationComparer:
                     print(f"Attempt {attempt + 1} failed for {item.get('name', 'unknown')}: {error_msg}. Retrying in {delay}s...")
                     time.sleep(delay)
 
-    def __call__(self, dataset: Dataset, max_workers: int) -> list:
+    def __call__(self, dataset: Dataset, max_workers: int, on_result=None) -> list:
         """Process the dataset in parallel and return a list of comparison results."""
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(
-                tqdm(executor.map(self.compare_item, dataset), total=len(dataset))
-            )
+            futures = [executor.submit(self.compare_item, item) for item in dataset]
+            results = []
+            with tqdm(total=len(futures)) as progress:
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    results.append(result)
+                    if result is not None and on_result is not None:
+                        on_result(result)
+                    progress.update(1)
         return results
 
 
@@ -293,6 +338,13 @@ class TranslationComparer:
     help='Minimum delay between judge API calls. Use 13 for Gemini free-tier 5 RPM.',
 )
 @click.option(
+    '--request-timeout-seconds',
+    default=180.0,
+    type=float,
+    show_default=True,
+    help='Per-request API timeout. Prevents stalled judge calls from blocking the whole run.',
+)
+@click.option(
     '--api-key-env',
     default=os.getenv("JUDGE_API_KEY_ENV", "OPENAI_API_KEY"),
     show_default=True,
@@ -312,7 +364,7 @@ class TranslationComparer:
     help='Use native Gemini API instead of OpenAI-compatible endpoint. Bypasses safety filtering and may avoid API errors.',
 )
 @click.option('--rejudge', is_flag=True, help='Ignore existing judgments and redo all pairs.')
-def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, request_delay_seconds, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
+def main(base_url, judge_model, test_model, generate_base_set, max_workers, concurrency_limit, request_delay_seconds, request_timeout_seconds, api_key_env, pairs_file, skip_ids, skip_ids_file, gemini_judge, rejudge):
     """Compare translations between different models using a third LLM as analyzer.
 
     Reads the translation pairs from the JSONL file, creates a dataset,
@@ -442,6 +494,9 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
             continue
         pending_pairs.append(pair)
 
+    if rejudge:
+        output_path.write_text("", encoding="utf-8")
+
     # Create dataset and shuffle it
     translations = Dataset.from_list(pending_pairs)
     translations = translations.shuffle(seed=42)  # Set seed for reproducibility
@@ -467,9 +522,27 @@ def main(base_url, judge_model, test_model, generate_base_set, max_workers, conc
         prompt_path=prompt_path,
         use_gemini=gemini_judge,
         request_delay_seconds=request_delay_seconds,
+        request_timeout_seconds=request_timeout_seconds,
     )
 
-    results = comparer(translations, max_workers=max_workers)
+    checkpoint_lock = threading.Lock()
+    checkpoint_seen_ids = set(existing_by_id.keys())
+
+    def write_checkpoint(item: dict) -> None:
+        item_id = item.get("id")
+        if not item_id:
+            return
+        with checkpoint_lock:
+            if item_id in checkpoint_seen_ids:
+                return
+            checkpoint_seen_ids.add(item_id)
+            with output_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    results = comparer(translations, max_workers=max_workers, on_result=write_checkpoint)
+
+    if comparer.abort_reason:
+        raise SystemExit(comparer.abort_reason)
 
     # Filter out None results from failed items
     successful_results = [item for item in results if item is not None]
